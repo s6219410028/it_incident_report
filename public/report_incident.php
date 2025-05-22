@@ -1,13 +1,15 @@
 <?php
+// report_incident.php
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
+date_default_timezone_set('Asia/Bangkok');
 
 session_start();
 include __DIR__ . '/db_config.php';
 $db = getDb('itd');
 
-
+// ─── pull HRM users for staffcode lookup ─────────────────────────────────
 $hrm = getDb('hrm');
 $hrmUsers = $hrm->query("
     SELECT 
@@ -15,131 +17,207 @@ $hrmUsers = $hrm->query("
       CONCAT(u.firstname,' ',u.lastname) AS name,
       CASE
         WHEN u.branch_id = 1 THEN 'Q.A'
-        WHEN u.branch_id = 2 THEN 'BOX 1'
-        WHEN u.branch_id = 3 THEN 'BOX 2'
-        WHEN u.branch_id = 4 THEN 'BOX 3'
-        WHEN u.branch_id = 5 THEN 'BOX 4'
-        WHEN u.branch_id = 6 THEN 'BOX กะ'
-        WHEN u.branch_id = 7 THEN 'Collector ติดตามเก็บเงิน'
-        WHEN u.branch_id = 8 THEN 'CRM'
-        WHEN u.branch_id = 9 THEN 'DBU'
-        WHEN u.branch_id = 10 THEN 'DETAIL ต่างจังหวัด(Sale โรงพยาบาล)'
-        /* …etc… */
-        WHEN u.branch_id = 93 THEN 'ผู้จัดการควบคุมคุณภาพ'
+		WHEN u.branch_id = 2 THEN 'BOX 1'
+		WHEN u.branch_id = 3 THEN 'BOX 2'
+		WHEN u.branch_id = 4  THEN 'BOX 3'
+		WHEN u.branch_id = 5  THEN 'BOX 4'
+		WHEN u.branch_id = 6  THEN 'BOX กะ'
+		WHEN u.branch_id = 7  THEN 'Collector ติดตามเก็บเงิน'
+		WHEN u.branch_id = 8  THEN 'CRM'
+		WHEN u.branch_id = 9  THEN 'DBU'
+		WHEN u.branch_id = 10 THEN 'DETAIL ต่างจังหวัด(Sale โรงพยาบาล)'
+		WHEN u.branch_id = 11 THEN 'DETAIL กทม(Sale โรงพยาบาล)'
+		WHEN u.branch_id = 12 THEN 'DETAIL2 ต่างจังหวัด (Sale โรงพยาบาล)'
+		WHEN u.branch_id = 13 THEN 'FOOD'
+		WHEN u.branch_id = 14 THEN 'Import-Export'
+		WHEN u.branch_id = 15 THEN 'INKJET'
+		WHEN u.branch_id = 16 THEN 'IT'
+		WHEN u.branch_id = 17 THEN 'M 1'
+		WHEN u.branch_id = 18 THEN 'M 2'
+		WHEN u.branch_id = 19 THEN 'M 3'
+		WHEN u.branch_id = 20 THEN 'M 4'
+		WHEN u.branch_id = 21 THEN 'M 5'
+		WHEN u.branch_id = 22 THEN 'Modern Trade'
+		WHEN u.branch_id = 23 THEN 'Online'
+		WHEN u.branch_id = 24 THEN 'OTC ต่างจังหวัด(Sale ร้านค้า)'
+		WHEN u.branch_id = 25 THEN 'OTC 2 กทม.(Sale ร้านค้า)'
+		WHEN u.branch_id = 26 THEN 'OTC 2 ต่างจังหวัด(Sale ร้านค้า)'
+		WHEN u.branch_id = 27 THEN 'OTC 3 ต่างจังหวัด(Sale ร้านค้า)'
+		WHEN u.branch_id = 28 THEN 'OTC กทม.(Sale ร้านค้า)'
+		WHEN u.branch_id = 29 THEN 'OTC 3 กทม.(Sale ร้านค้า)'
+		WHEN u.branch_id = 30 THEN 'P/M'
+		WHEN u.branch_id = 31 THEN 'PROJECT MANAGER'
+		WHEN u.branch_id = 32 THEN 'TMT'
+		WHEN u.branch_id = 33 THEN 'ขนส่ง'
+		WHEN u.branch_id = 34 THEN 'คลังบรรจุภัณฑ์'
+		WHEN u.branch_id = 35 THEN 'คลังวัตถุดิบ'
+		WHEN u.branch_id = 36 THEN 'คลังสินค้าสำเร็จรูป'
+		WHEN u.branch_id = 37 THEN 'ควบคุมคุณภาพ'
+		WHEN u.branch_id = 38 THEN 'ควบคุมคุณภาพด้านจุลชีววิทยา'
+		WHEN u.branch_id = 39 THEN 'ควบคุมคุณภาพด้านบรรจุภัณฑ์'
+		WHEN u.branch_id = 40 THEN 'เคลือบ'
+		WHEN u.branch_id = 41 THEN 'แคปซูล'
+		WHEN u.branch_id = 42 THEN 'งานเอกสารผลิต'
+		WHEN u.branch_id = 43 THEN 'จัดซื้อ'
+		WHEN u.branch_id = 44 THEN 'เจ้าหน้าที่ความปลอดภัยในการทำงาน'
+		WHEN u.branch_id = 45 THEN 'ชิ้งยา'
+		WHEN u.branch_id = 46 THEN 'ซ่อมบำรุง'
+		WHEN u.branch_id = 47 THEN 'ตรวจบิล'
+		WHEN u.branch_id = 48 THEN 'ตอกยา'
+		WHEN u.branch_id = 49 THEN 'ทรัพยากรบุคคล'
+		WHEN u.branch_id = 50 THEN 'ทะเบียนยา'
+		WHEN u.branch_id = 51 THEN 'ทั่วไป'
+		WHEN u.branch_id = 52 THEN 'ทั่วไป'
+		WHEN u.branch_id = 53 THEN 'ธุรการขาย'
+		WHEN u.branch_id = 54 THEN 'ธุรการควบคุมเอกสาร'
+		WHEN u.branch_id = 55 THEN 'นักวิทยาศาสตร์'
+		WHEN u.branch_id = 56 THEN 'บรรจุ'
+		WHEN u.branch_id = 57 THEN 'บรรจุยาครีม'
+		WHEN u.branch_id = 58 THEN 'บรรจุยาผง'
+		WHEN u.branch_id = 59 THEN 'บริหาร'
+		WHEN u.branch_id = 60 THEN 'บริสเตอร์แพค'
+		WHEN u.branch_id = 61 THEN 'บัญชีภาษี'
+		WHEN u.branch_id = 62 THEN 'บัญชีลูกหนี้'
+		WHEN u.branch_id = 63 THEN 'บัญชีและการเงิน'
+		WHEN u.branch_id = 64 THEN 'บัญชีและการเงิน'
+		WHEN u.branch_id = 65 THEN 'ประกันคุณภาพวิเคราะห์'
+		WHEN u.branch_id = 66 THEN 'ประสานงานการผลิต'
+		WHEN u.branch_id = 67 THEN 'ประสานขนส่ง'
+		WHEN u.branch_id = 68 THEN 'ผลิตภัณฑ์&การตลาด'
+		WHEN u.branch_id = 69 THEN 'ผลิตภัณฑ์&การตลาด'
+		WHEN u.branch_id = 70 THEN 'ผสมยาน้ำ,ยาครีม'
+		WHEN u.branch_id = 71 THEN 'ผสมยาเม็ด'
+		WHEN u.branch_id = 72 THEN 'ผู้จัดการทั่วไป'
+		WHEN u.branch_id = 73 THEN 'ผู้ช่วยเภสัชกร'
+		WHEN u.branch_id = 74 THEN 'พัฒนาธุรกิจ'
+		WHEN u.branch_id = 75 THEN 'พิมพ์ฉลาก'
+		WHEN u.branch_id = 76 THEN 'ฟอล์ย Manual'
+		WHEN u.branch_id = 77 THEN 'ฟิล์มยา'
+		WHEN u.branch_id = 78 THEN 'เภสัชกรฝ่าย R&D'
+		WHEN u.branch_id = 79 THEN 'เภสัชกรฝ่ายควบคุมคุณภาพ'
+		WHEN u.branch_id = 80 THEN 'เภสัชกรฝ่ายประกันคุณภาพ'
+		WHEN u.branch_id = 81 THEN 'เภสัชกรฝ่ายผลิต'
+		WHEN u.branch_id = 82 THEN 'แม่บ้าน'
+		WHEN u.branch_id = 83 THEN 'รับ/จ่าย'
+		WHEN u.branch_id = 84 THEN 'โรตารี่'
+		WHEN u.branch_id = 85 THEN 'ล้างถาด'
+		WHEN u.branch_id = 86 THEN 'เลขาผู้บริหาร'
+		WHEN u.branch_id = 87 THEN 'วิจัย&พัฒนาผลิตภัณฑ์'
+		WHEN u.branch_id = 88 THEN 'บรรจุยาน้ำ'
+		WHEN u.branch_id = 89 THEN 'OTC3 กทม (Office)'
+		WHEN u.branch_id = 90 THEN 'Sale Director'
+		WHEN u.branch_id = 91 THEN 'QA Senior'
+		WHEN u.branch_id = 92 THEN 'ขายในประเทศ'
+		WHEN u.branch_id = 93 THEN 'ผู้จัดการควบคุมคุณภาพ'
         ELSE 'ไม่ระบุ'
       END AS branch_name
     FROM users u
     ORDER BY u.firstname, u.lastname
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-
-$assignees = $db
-    ->query("SELECT DISTINCT assign_to
-              FROM incidents
-             WHERE assign_to <> ''
-             ORDER BY assign_to")
-    ->fetchAll(PDO::FETCH_COLUMN);
-
+// ─── Unified POST handler ───────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-
-    error_log("===== \$_POST:\n" . print_r($_POST, true));
-    error_log("===== \$_FILES:\n" . print_r($_FILES, true));
-
+    // 1) DELETE?
     if (!empty($_POST['delete_id'])) {
         $db->prepare("DELETE FROM incidents WHERE id = ?")
             ->execute([(int) $_POST['delete_id']]);
-        header('Location: report_incident.php');
-        exit;
-    }
 
-    if (!empty($_POST['update_id'])) {
+        // 2) UPDATE?
+    } elseif (!empty($_POST['update_id'])) {
+        $id = (int) $_POST['update_id'];
+        $status = $_POST['status'] ?? 'Open';
+        $raw = $_POST['assign_to'] ?? '';
+        $assign = $raw === '__other__'
+            ? trim($_POST['assign_custom'] ?? '')
+            : trim($raw);
+        $remark = trim($_POST['remark'] ?? '');
         $now = date('Y-m-d H:i:s');
-        $status = $_POST['status'];
-        $assign = trim($_POST['assign_to']);
 
+        // base UPDATE (always include remark)
         $sql = "UPDATE incidents
-                     SET status     = ?,
+                     SET updated_at = ?,
+                         status     = ?,
                          assign_to  = ?,
-                         updated_at = NOW()";
-        $params = [$status, $assign];
+                         remark     = ?";
+        $params = [$now, $status, $assign, $remark];
 
+        // conditional timestamps
+        if ($status === 'Open') {
+            $sql .= ", assigned_at = ?";
+            $params[] = $now;
+        }
         if ($status === 'In Progress') {
             $sql .= ", inprogress_at = ?";
             $params[] = $now;
-        } elseif ($status === 'Closed') {
+        }
+        if ($status === 'Closed') {
             $sql .= ", resolved_at = ?";
+            $params[] = $now;
+        }
+        if ($status === 'Cancelled') {
+            $sql .= ", cancelled_at = ?";
             $params[] = $now;
         }
 
         $sql .= " WHERE id = ?";
-        $params[] = (int) $_POST['update_id'];
-
+        $params[] = $id;
         $db->prepare($sql)->execute($params);
-        header('Location: report_incident.php');
-        exit;
-    }
 
-    $now = date('Y-m-d H:i:s');
+        // 3) INSERT new incident + photos
+    } else {
+        $now = date('Y-m-d H:i:s');
+        // a) insert incident
+        $stmt = $db->prepare("
+            INSERT INTO incidents
+              (problem_type, custom_problem, severity,
+               description, informant_name, informant_department,
+               status, assigned_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'Open', ?, ?)
+        ");
+        $stmt->execute([
+            $_POST['problem_type'] ?? '',
+            $_POST['custom_problem'] ?? '',
+            (int) ($_POST['severity'] ?? 0),
+            $_POST['description'] ?? '',
+            $_POST['informant_name'] ?? '',
+            $_POST['informant_department'] ?? '',
+            $now,  // assigned_at
+            $now   // created_at
+        ]);
 
-    $stmt = $db->prepare("
-        INSERT INTO incidents
-          (problem_type, custom_problem, severity,
-           description, informant_name, informant_department,
-           status, assigned_at, created_at)
-        VALUES (?,?,?,?,?,?,'Open',?,NOW())
-    ");
-    $stmt->execute([
-        $_POST['problem_type'] ?? '',
-        $_POST['custom_problem'] ?? '',
-        (int) ($_POST['severity'] ?? 0),
-        $_POST['description'] ?? '',
-        $_POST['informant_name'] ?? '',
-        $_POST['informant_department'] ?? '',
-        $now
-    ]);
+        // b) grab new incident ID
+        $incidentId = $db->lastInsertId();
 
-    $incidentId = $db->lastInsertId();
-    error_log("→ Inserted incident #{$incidentId}");
+        // c) handle photo uploads
+        if (!empty($_FILES['photos']['tmp_name']) && is_array($_FILES['photos']['tmp_name'])) {
+            $uploadDir = __DIR__ . '/uploads/';
+            if (!is_dir($uploadDir))
+                mkdir($uploadDir, 0755, true);
 
-    $uploadDir = __DIR__ . '/uploads/';
-    if (!is_dir($uploadDir)) {
-        mkdir($uploadDir, 0755, true);
-    }
-    if (!is_writable($uploadDir)) {
-        error_log("⚠️ UPLOAD DIR NOT WRITABLE: {$uploadDir}");
-        die("Upload folder not writable. Check server permissions.");
-    }
-
-    if (!empty($_FILES['photos']['tmp_name']) && is_array($_FILES['photos']['tmp_name'])) {
-        foreach ($_FILES['photos']['error'] as $i => $err) {
-            error_log("Photo #{$i} upload error code: {$err}");
-            if ($err !== UPLOAD_ERR_OK)
-                continue;
-
-            $tmp = $_FILES['photos']['tmp_name'][$i];
-            $orig = basename($_FILES['photos']['name'][$i]);
-            $ext = pathinfo($orig, PATHINFO_EXTENSION);
-            $new = uniqid("inc{$incidentId}_") . ".$ext";
-            $dest = $uploadDir . $new;
-
-            if (move_uploaded_file($tmp, $dest)) {
-                error_log("✓ Moved $orig → uploads/$new");
-                // insert into incident_photos
-                $db->prepare("
-                  INSERT INTO incident_photos (incident_id, file_path)
-                  VALUES (?,?)
-                ")->execute([$incidentId, "uploads/$new"]);
-                error_log("✓ Recorded photo for incident #{$incidentId}");
-            } else {
-                error_log("✗ FAILED to move $orig to $dest");
+            foreach ($_FILES['photos']['error'] as $i => $err) {
+                if ($err !== UPLOAD_ERR_OK)
+                    continue;
+                $tmp = $_FILES['photos']['tmp_name'][$i];
+                $orig = basename($_FILES['photos']['name'][$i]);
+                $ext = pathinfo($orig, PATHINFO_EXTENSION);
+                $new = uniqid("inc{$incidentId}_") . ".$ext";
+                if (move_uploaded_file($tmp, "$uploadDir$new")) {
+                    $db->prepare("
+                      INSERT INTO incident_photos (incident_id, file_path)
+                      VALUES (?, ?)
+                    ")->execute([$incidentId, "uploads/$new"]);
+                }
             }
         }
     }
 
+    // redirect to clear POST
     header('Location: report_incident.php');
     exit;
 }
 
+
+// ─── Fetch only Open & In Progress incidents for display ───────────
 $incidents = $db->query("
     SELECT 
       i.id,
@@ -151,6 +229,7 @@ $incidents = $db->query("
       i.informant_department,
       i.status,
       i.assign_to,
+      i.remark,
       DATE_FORMAT(i.created_at,    '%Y-%m-%d %H:%i') AS created_at,
       DATE_FORMAT(i.assigned_at,   '%Y-%m-%d %H:%i') AS assigned_at,
       DATE_FORMAT(i.inprogress_at, '%Y-%m-%d %H:%i') AS inprogress_at,
@@ -159,9 +238,8 @@ $incidents = $db->query("
     WHERE i.status IN ('Open','In Progress')
     ORDER BY i.id DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
-
-
 ?>
+
 
 <!DOCTYPE html>
 <html lang="en">
@@ -401,11 +479,11 @@ $incidents = $db->query("
                                     <td><?= $i['assigned_at'] ?: '-' ?></td>
                                     <td><?= $i['inprogress_at'] ?: '-' ?></td>
                                     <td>
-                                        <button class="btn btn-sm btn-secondary view-btn" data-bs-toggle="modal"
-                                            data-bs-target="#viewModal" data-id="<?= $i['id'] ?>"
+                                        <button type="button" class="btn btn-sm btn-secondary view-btn"
+                                            data-bs-toggle="modal" data-bs-target="#viewModal" data-id="<?= $i['id'] ?>"
                                             data-problem="<?= htmlspecialchars($i['problem_type']) ?>"
                                             data-custom="<?= htmlspecialchars($i['custom_problem']) ?>"
-                                            data-severity="<?= htmlspecialchars($i['severity']) ?>"
+                                            data-severity="<?= $i['severity'] ?>"
                                             data-informant="<?= htmlspecialchars($i['informant_name']) ?>"
                                             data-department="<?= htmlspecialchars($i['informant_department']) ?>"
                                             data-description="<?= htmlspecialchars($i['description']) ?>"
@@ -418,8 +496,16 @@ $incidents = $db->query("
                                             data-photos='<?= htmlspecialchars($photosJson, ENT_QUOTES) ?>'>
                                             View
                                         </button>
-                                        <button class="btn btn-sm btn-info edit-btn" …>Edit</button>
-                                        <form method="post" style="display:inline" …>
+
+                                        <button type="button" class="btn btn-sm btn-info edit-btn" data-id="<?= $i['id'] ?>"
+                                            data-id="<?= $i['id'] ?>" data-status="<?= htmlspecialchars($i['status']) ?>"
+                                            data-assign="<?= htmlspecialchars($i['assign_to']) ?>"
+                                            data-remark="<?= htmlspecialchars($i['remark'] ?? '', ENT_QUOTES) ?>">
+                                            Edit
+                                        </button>
+
+                                        <form method="post" style="display:inline"
+                                            onsubmit="return confirm('Delete incident #<?= $i['id'] ?>?')">
                                             <input type="hidden" name="delete_id" value="<?= $i['id'] ?>">
                                             <button type="submit" class="btn btn-sm btn-danger">Delete</button>
                                         </form>
@@ -432,8 +518,6 @@ $incidents = $db->query("
             </div>
         </div>
 
-
-
         <!-- Add Incident Modal -->
         <div class="modal fade" id="incidentModal" tabindex="-1">
             <div class="modal-dialog modal-lg">
@@ -444,7 +528,6 @@ $incidents = $db->query("
                             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                         </div>
                         <div class="modal-body">
-                            <!-- Problem Type, Severity, Staff Code, Name, Dept., Description -->
                             <div class="row g-3">
                                 <div class="col-md-6">
                                     <label>Problem Type</label>
@@ -552,16 +635,29 @@ $incidents = $db->query("
                             <dd class="col-sm-9" id="view-assigned_at"></dd>
                             <dt class="col-sm-3">In Progress</dt>
                             <dd class="col-sm-9" id="view-inprogress_at"></dd>
-                            <dt class="col-sm-3">Resolved At</dt>
-                            <dd class="col-sm-9" id="view-resolved_at"></dd>
+                            <dt class="col-sm-3">Photos</dt>
+                            <dd class="col-sm-9" id="view-photos"><em>No photos</em></dd>
                         </dl>
                     </div>
                 </div>
             </div>
         </div>
 
-
-
+        <!-- Full-Screen Photo Preview Modal -->
+        <div class="modal fade" id="photoModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered modal-fullscreen">
+                <div class="modal-content bg-dark">
+                    <div class="modal-header border-0">
+                        <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal"
+                            aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body d-flex justify-content-center align-items-center p-0">
+                        <img src="" id="photoModalImg" class="img-fluid" style="max-height:100vh; width:auto;"
+                            alt="Incident Photo">
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- Edit Incident Modal -->
         <div class="modal fade" id="editIncidentModal" tabindex="-1">
@@ -570,7 +666,7 @@ $incidents = $db->query("
                     <form method="post" id="editIncidentForm">
                         <div class="modal-header">
                             <h5 class="modal-title">Edit Incident</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            <button class="btn-close" data-bs-dismiss="modal"></button>
                         </div>
                         <div class="modal-body">
                             <input type="hidden" name="update_id" id="edit_update_id">
@@ -580,6 +676,7 @@ $incidents = $db->query("
                                     <option>Open</option>
                                     <option>In Progress</option>
                                     <option>Closed</option>
+                                    <option>Cancelled</option>
                                 </select>
                             </div>
                             <div class="mb-3">
@@ -594,9 +691,14 @@ $incidents = $db->query("
                                 <input type="text" name="assign_custom" id="edit_assign_custom"
                                     class="form-control mt-2" placeholder="Enter new assignee" style="display:none;">
                             </div>
+                            <div class="mb-3">
+                                <label for="edit_remark" class="form-label">Remark</label>
+                                <textarea name="remark" id="edit_remark" class="form-control" rows="3"
+                                    placeholder="Enter a remark when closing or cancelling"></textarea>
+                            </div>
                         </div>
                         <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                             <button type="submit" class="btn btn-primary">Save changes</button>
                         </div>
                     </form>
@@ -636,45 +738,99 @@ $incidents = $db->query("
 
                 // ─── View-modal ─────────────────────────────────────────────────
                 $('.view-btn').on('click', function () {
-                    const b = $(this);
-                    $('#view-id').text(b.data('id'));
-                    $('#view-problem').text(b.data('problem'));
-                    $('#view-custom').text(b.data('custom'));
-                    $('#view-severity').text(b.data('severity'));
-                    $('#view-informant').text(b.data('informant'));
-                    $('#view-dept').text(b.data('department'));
-                    $('#view-description').text(b.data('description'));
-                    $('#view-created').text(b.data('created'));
-                    $('#view-status').text(b.data('status'));
-                    $('#view-assign').text(b.data('assign'));
-                    $('#view-assigned_at').text(b.data('assigned_at'));
-                    $('#view-inprogress_at').text(b.data('inprogress_at'));
-                    $('#view-resolved_at').text(b.data('resolved_at'));
+                    const btn = $(this);
+                    const photos = JSON.parse(btn.attr('data-photos') || '[]');
+
+                    $('#view-id').text(btn.data('id'));
+                    $('#view-problem').text(btn.data('problem'));
+                    $('#view-custom').text(btn.data('custom'));
+                    $('#view-severity').text(btn.data('severity'));
+                    $('#view-informant').text(btn.data('informant'));
+                    $('#view-dept').text(btn.data('department'));
+                    $('#view-description').text(btn.data('description'));
+                    $('#view-created').text(btn.data('created'));
+                    $('#view-status').text(btn.data('status'));
+                    $('#view-assign').text(btn.data('assign'));
+                    $('#view-assigned_at').text(btn.data('assigned_at'));
+                    $('#view-inprogress_at').text(btn.data('inprogress_at'));
+
+                    // render photos thumbnails
+                    let html = '';
+                    photos.forEach(p => {
+                        html += `
+                        <img
+                          src="${p}"
+                          class="img-thumbnail photo-thumb me-1 mb-1"
+                          style="max-height:300px; cursor:pointer;"
+                          alt="Incident Photo"
+                        >
+                      `;
+                    });
+                    $('#view-photos').html(html || '<em>No photos</em>');
+                });
+
+                $(document).on('click', '.photo-thumb', function () {
+                    const src = $(this).attr('src');
+                    $('#photoModalImg').attr('src', src);
+                    new bootstrap.Modal($('#photoModal')).show();
                 });
 
                 // ─── Edit-modal ────────────────────────────────────────────────
                 $('.edit-btn').on('click', function () {
                     const btn = $(this),
                         id = btn.data('id'),
-                        st = btn.data('status'),
-                        as = btn.data('assign');
+                        status = btn.data('status'),
+                        assign = btn.data('assign'),
+                        remark = btn.data('remark') || '';
+
                     $('#edit_update_id').val(id);
-                    $('#edit_status').val(st);
-                    if (as && !['', 'Open', 'In Progress', 'Closed'].includes(as)) {
-                        $('#edit_assign_to').val('__other__');
-                        $('#edit_assign_custom').show().val(as);
+                    $('#edit_status').val(status);
+                    $('#edit_assign_to').val(
+                        (!assign || ['', 'Open', 'In Progress', 'Closed', 'Cancelled'].includes(assign))
+                            ? assign
+                            : '__other__'
+                    );
+                    if (assign && !['', 'Open', 'In Progress', 'Closed', 'Cancelled'].includes(assign)) {
+                        $('#edit_assign_custom').show().val(assign);
                     } else {
-                        $('#edit_assign_to').val(as || '');
                         $('#edit_assign_custom').hide().val('');
                     }
+
+                    // 👉 Populate and toggle remark field
+                    $('#edit_remark').val(remark);
+                    if (['Closed', 'Cancelled'].includes(status)) {
+                        $('#edit_remark_group').show();
+                    } else {
+                        $('#edit_remark_group').hide();
+                    }
+
                     new bootstrap.Modal($('#editIncidentModal')).show();
                 });
-                $('#edit_assign_to').on('change', function () {
-                    if (this.value === '__other__') {
-                        $('#edit_assign_custom').show().focus();
+
+                $('#edit_status').on('change', function () {
+                    if (['Closed', 'Cancelled'].includes(this.value)) {
+                        $('#edit_remark_group').show().find('textarea').focus();
                     } else {
-                        $('#edit_assign_custom').hide();
+                        $('#edit_remark_group').hide();
                     }
+                });
+
+            });
+        </script>
+        <!-- sidebar toggle script: -->
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                const sidebar = document.getElementById('sidebar');
+                const container = document.getElementById('container');
+                const wasExpanded = localStorage.getItem('sidebarExpanded') === 'true';
+                if (wasExpanded) {
+                    sidebar.classList.add('expanded');
+                    container.classList.add('expanded');
+                }
+                sidebar.querySelector('h2').addEventListener('click', function () {
+                    const expanded = sidebar.classList.toggle('expanded');
+                    container.classList.toggle('expanded');
+                    localStorage.setItem('sidebarExpanded', expanded);
                 });
             });
         </script>
