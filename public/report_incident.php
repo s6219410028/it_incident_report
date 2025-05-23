@@ -796,7 +796,6 @@ $incidents = $db->query("
                         $('#edit_assign_custom').hide().val('');
                     }
 
-                    // 👉 Populate and toggle remark field
                     $('#edit_remark').val(remark);
                     if (['Closed', 'Cancelled'].includes(status)) {
                         $('#edit_remark_group').show();
