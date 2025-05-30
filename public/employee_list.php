@@ -243,17 +243,22 @@ try {
             opacity: 1;
         }
 
-        /* Main container styles */
-        .container {
+        .container-fluid {
             margin-left: 50px;
-            width: calc(100% - 50px);
-            transition: margin-left 0.3s ease, width 0.3s ease;
             padding: 20px;
+            transition: margin-left .3s ease;
+            width: calc(100% - 50px);
+
         }
 
-        .container.expanded {
+        .container-fluid.expanded {
             margin-left: 250px;
             width: calc(100% - 250px);
+        }
+
+        .container-fluid>.card {
+            width: 100%;
+
         }
 
         .main-content {
@@ -337,7 +342,7 @@ try {
         <a href="logout.php"><i class="fas fa-sign-out-alt"></i><span class="link-text">Logout</span></a>
     </div>
     <!-- Main container -->
-    <div class="container" id="container">
+    <div class="container-fluid" id="container">
         <div class="main-content">
             <h1>Employee List</h1>
             <div class="table-card">

@@ -115,15 +115,18 @@ $hrmUsers = $hrm->query("
     ORDER BY u.firstname, u.lastname
 ")->fetchAll(PDO::FETCH_ASSOC);
 
+
+$assignees = $db
+    ->query("SELECT DISTINCT assign_to
+            FROM incidents
+           WHERE assign_to <> ''
+           ORDER BY assign_to")
+    ->fetchAll(PDO::FETCH_COLUMN);
+
+
 // ─── Unified POST handler ───────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // 1) DELETE?
-    if (!empty($_POST['delete_id'])) {
-        $db->prepare("DELETE FROM incidents WHERE id = ?")
-            ->execute([(int) $_POST['delete_id']]);
-
-        // 2) UPDATE?
-    } elseif (!empty($_POST['update_id'])) {
+    if (!empty($_POST['update_id'])) {
         $id = (int) $_POST['update_id'];
         $status = $_POST['status'] ?? 'Open';
         $raw = $_POST['assign_to'] ?? '';
@@ -135,19 +138,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // base UPDATE (always include remark)
         $sql = "UPDATE incidents
-                     SET updated_at = ?,
-                         status     = ?,
-                         assign_to  = ?,
-                         remark     = ?";
+                       SET updated_at = ?,
+                           status     = ?,
+                           assign_to  = ?,
+                           remark     = ?";
         $params = [$now, $status, $assign, $remark];
 
         // conditional timestamps
         if ($status === 'Open') {
+            // someone set it back to Open → stamp assigned_at
             $sql .= ", assigned_at = ?";
             $params[] = $now;
         }
         if ($status === 'In Progress') {
-            $sql .= ", inprogress_at = ?";
+            // **NEW**: stamp both assigned_at & inprogress_at
+            $sql .= ", assigned_at = ?, inprogress_at = ?";
+            $params[] = $now;
             $params[] = $now;
         }
         if ($status === 'Closed') {
@@ -163,16 +169,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $params[] = $id;
         $db->prepare($sql)->execute($params);
 
-        // 3) INSERT new incident + photos
     } else {
         $now = date('Y-m-d H:i:s');
-        // a) insert incident
+        // a) insert incident (assigned_at left NULL)
         $stmt = $db->prepare("
             INSERT INTO incidents
               (problem_type, custom_problem, severity,
                description, informant_name, informant_department,
-               status, assigned_at, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, 'Open', ?, ?)
+               status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'Open', NOW())
         ");
         $stmt->execute([
             $_POST['problem_type'] ?? '',
@@ -181,8 +186,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_POST['description'] ?? '',
             $_POST['informant_name'] ?? '',
             $_POST['informant_department'] ?? '',
-            $now,  // assigned_at
-            $now   // created_at
         ]);
 
         // b) grab new incident ID
@@ -203,8 +206,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $new = uniqid("inc{$incidentId}_") . ".$ext";
                 if (move_uploaded_file($tmp, "$uploadDir$new")) {
                     $db->prepare("
-                      INSERT INTO incident_photos (incident_id, file_path)
-                      VALUES (?, ?)
+                        INSERT INTO incident_photos (incident_id, file_path)
+                        VALUES (?, ?)
                     ")->execute([$incidentId, "uploads/$new"]);
                 }
             }
@@ -215,6 +218,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Location: report_incident.php');
     exit;
 }
+
 
 
 // ─── Fetch only Open & In Progress incidents for display ───────────
@@ -246,10 +250,12 @@ $incidents = $db->query("
 
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Assigned Incidents</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.datatables.net/1.13.4/css/dataTables.bootstrap5.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.4.1/css/responsive.bootstrap5.min.css" />
     <style>
         /* Severity badges */
         .badge-severity {
@@ -373,22 +379,20 @@ $incidents = $db->query("
             opacity: 1;
         }
 
-        .container {
+        .container-fluid {
             margin-left: 50px;
             padding: 20px;
-            transition: margin-left .3s, width .3s;
-            overflow-x: auto;
+            transition: margin-left .3s ease;
             width: calc(100% - 50px);
 
         }
 
-        .container.expanded {
+        .container-fluid.expanded {
             margin-left: 250px;
             width: calc(100% - 250px);
         }
 
-        .container>.card {
-            margin: 1rem 0;
+        .container-fluid>.card {
             width: 100%;
 
         }
@@ -396,7 +400,6 @@ $incidents = $db->query("
         .card-body,
         .card-body .table-responsive {
             width: 100%;
-            overflow-x: auto;
         }
 
         .dataTables_wrapper .dataTables_filter {
@@ -406,6 +409,10 @@ $incidents = $db->query("
         .nowrap th,
         .nowrap td {
             white-space: nowrap;
+        }
+
+        .dataTables_scrollBody {
+            width: 100% !important;
         }
     </style>
 </head>
@@ -422,8 +429,8 @@ $incidents = $db->query("
         <a href="logout.php"><i class="fas fa-sign-out-alt"></i><span class="link-text">Logout</span></a>
     </div>
 
-    <div class="container" id="container">
-        <div class="card">
+    <div class="container-fluid" id="container">
+        <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5><i class="fas fa-exclamation-triangle me-2"></i>Assigned Incidents</h5>
                 <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#incidentModal">
@@ -497,18 +504,13 @@ $incidents = $db->query("
                                             View
                                         </button>
 
-                                        <button type="button" class="btn btn-sm btn-info edit-btn" data-id="<?= $i['id'] ?>"
-                                            data-id="<?= $i['id'] ?>" data-status="<?= htmlspecialchars($i['status']) ?>"
+                                        <button class="btn btn-sm btn-info edit-btn" data-id="<?= $i['id'] ?>"
+                                            data-status="<?= htmlspecialchars($i['status']) ?>"
                                             data-assign="<?= htmlspecialchars($i['assign_to']) ?>"
-                                            data-remark="<?= htmlspecialchars($i['remark'] ?? '', ENT_QUOTES) ?>">
+                                            data-remark="<?= htmlspecialchars($i['remark'] ?? '') ?>">
                                             Edit
                                         </button>
 
-                                        <form method="post" style="display:inline"
-                                            onsubmit="return confirm('Delete incident #<?= $i['id'] ?>?')">
-                                            <input type="hidden" name="delete_id" value="<?= $i['id'] ?>">
-                                            <button type="submit" class="btn btn-sm btn-danger">Delete</button>
-                                        </form>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -517,323 +519,358 @@ $incidents = $db->query("
                 </div>
             </div>
         </div>
+    </div>
 
-        <!-- Add Incident Modal -->
-        <div class="modal fade" id="incidentModal" tabindex="-1">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <form method="post" enctype="multipart/form-data">
-                        <div class="modal-header">
-                            <h5 class="modal-title">Add Incident</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <div class="row g-3">
-                                <div class="col-md-6">
-                                    <label>Problem Type</label>
-                                    <select name="problem_type" class="form-select">
-                                        <option>Hardware</option>
-                                        <option>Software</option>
-                                        <option>IT Support</option>
-                                        <option>ERP</option>
-                                        <option>Other</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-6">
-                                    <label>If Other, specify</label>
-                                    <input type="text" name="custom_problem" class="form-control"
-                                        placeholder="Custom Problem Type">
-                                </div>
-                            </div>
-                            <div class="row g-3 mt-3">
-                                <div class="col-md-4">
-                                    <label>Severity</label>
-                                    <select name="severity" class="form-select">
-                                        <option value="1">1 - Lowest</option>
-                                        <option value="2">2 - Low</option>
-                                        <option value="3">3 - Normal</option>
-                                        <option value="4">4 - High</option>
-                                        <option value="5">5 - Highest</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-4">
-                                    <label>Staff Code</label>
-                                    <input type="text" id="staffcode" name="informant_staffcode" class="form-control"
-                                        placeholder="Type your staff code" list="staffcodeList" required>
-                                    <datalist id="staffcodeList">
-                                        <?php foreach ($hrmUsers as $u): ?>
-                                            <option value="<?= htmlspecialchars($u['staffcode']) ?>">
-                                            <?php endforeach; ?>
-                                    </datalist>
-                                </div>
-                                <div class="col-md-4">
-                                    <label>Name</label>
-                                    <input type="text" id="informant_name" name="informant_name" class="form-control"
-                                        readonly required>
-                                </div>
-                                <div class="col-md-4 mt-3">
-                                    <label>Department</label>
-                                    <input type="text" id="informant_department" name="informant_department"
-                                        class="form-control" readonly required>
-                                </div>
-                            </div>
-                            <div class="row g-3 mt-3">
-                                <div class="col-md-12">
-                                    <label>Description</label>
-                                    <textarea name="description" class="form-control" rows="4"
-                                        placeholder="Describe the incident" required></textarea>
-                                </div>
-                            </div>
-                            <div class="mb-3 mt-3">
-                                <label for="photos" class="form-label">Upload Photos</label>
-                                <input class="form-control" type="file" name="photos[]" id="photos" accept="image/*"
-                                    multiple>
-                                <div class="form-text">
-                                    Select one or more images (JPEG/PNG).
-                                </div>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="submit" class="btn btn-primary">Submit Incident</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
-
-        <!-- View Incident Modal -->
-        <div class="modal fade" id="viewModal" tabindex="-1" aria-labelledby="viewModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
+    <!-- Add Incident Modal -->
+    <div class="modal fade" id="incidentModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <form method="post" enctype="multipart/form-data">
                     <div class="modal-header">
-                        <h5 class="modal-title">Incident Details</h5>
+                        <h5 class="modal-title">Add Incident</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
-                        <dl class="row">
-                            <dt class="col-sm-3">ID</dt>
-                            <dd class="col-sm-9" id="view-id"></dd>
-                            <dt class="col-sm-3">Type</dt>
-                            <dd class="col-sm-9" id="view-problem"></dd>
-                            <dt class="col-sm-3">Custom</dt>
-                            <dd class="col-sm-9" id="view-custom"></dd>
-                            <dt class="col-sm-3">Severity</dt>
-                            <dd class="col-sm-9" id="view-severity"></dd>
-                            <dt class="col-sm-3">Informant</dt>
-                            <dd class="col-sm-9" id="view-informant"></dd>
-                            <dt class="col-sm-3">Dept.</dt>
-                            <dd class="col-sm-9" id="view-dept"></dd>
-                            <dt class="col-sm-3">Description</dt>
-                            <dd class="col-sm-9" id="view-description"></dd>
-                            <dt class="col-sm-3">Created At</dt>
-                            <dd class="col-sm-9" id="view-created"></dd>
-                            <dt class="col-sm-3">Status</dt>
-                            <dd class="col-sm-9" id="view-status"></dd>
-                            <dt class="col-sm-3">Assigned To</dt>
-                            <dd class="col-sm-9" id="view-assign"></dd>
-                            <dt class="col-sm-3">Assigned At</dt>
-                            <dd class="col-sm-9" id="view-assigned_at"></dd>
-                            <dt class="col-sm-3">In Progress</dt>
-                            <dd class="col-sm-9" id="view-inprogress_at"></dd>
-                            <dt class="col-sm-3">Photos</dt>
-                            <dd class="col-sm-9" id="view-photos"><em>No photos</em></dd>
-                        </dl>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Full-Screen Photo Preview Modal -->
-        <div class="modal fade" id="photoModal" tabindex="-1" aria-hidden="true">
-            <div class="modal-dialog modal-dialog-centered modal-fullscreen">
-                <div class="modal-content bg-dark">
-                    <div class="modal-header border-0">
-                        <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal"
-                            aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body d-flex justify-content-center align-items-center p-0">
-                        <img src="" id="photoModalImg" class="img-fluid" style="max-height:100vh; width:auto;"
-                            alt="Incident Photo">
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Edit Incident Modal -->
-        <div class="modal fade" id="editIncidentModal" tabindex="-1">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <form method="post" id="editIncidentForm">
-                        <div class="modal-header">
-                            <h5 class="modal-title">Edit Incident</h5>
-                            <button class="btn-close" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <input type="hidden" name="update_id" id="edit_update_id">
-                            <div class="mb-3">
-                                <label>Status</label>
-                                <select name="status" id="edit_status" class="form-select">
-                                    <option>Open</option>
-                                    <option>In Progress</option>
-                                    <option>Closed</option>
-                                    <option>Cancelled</option>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label>Problem Type</label>
+                                <select name="problem_type" class="form-select">
+                                    <option>Hardware</option>
+                                    <option>Software</option>
+                                    <option>IT Support</option>
+                                    <option>ERP</option>
+                                    <option>Other</option>
                                 </select>
                             </div>
-                            <div class="mb-3">
-                                <label>Assigned To</label>
-                                <select name="assign_to" id="edit_assign_to" class="form-select">
-                                    <option value="">-- Unassigned --</option>
-                                    <?php foreach ($assignees as $a): ?>
-                                        <option value="<?= htmlspecialchars($a) ?>"><?= htmlspecialchars($a) ?></option>
-                                    <?php endforeach; ?>
-                                    <option value="__other__">Other…</option>
+                            <div class="col-md-6">
+                                <label>If Other, specify</label>
+                                <input type="text" name="custom_problem" class="form-control"
+                                    placeholder="Custom Problem Type">
+                            </div>
+                        </div>
+                        <div class="row g-3 mt-3">
+                            <div class="col-md-4">
+                                <label>Severity</label>
+                                <select name="severity" class="form-select">
+                                    <option value="1">1 - Lowest</option>
+                                    <option value="2">2 - Low</option>
+                                    <option value="3">3 - Normal</option>
+                                    <option value="4">4 - High</option>
+                                    <option value="5">5 - Highest</option>
                                 </select>
-                                <input type="text" name="assign_custom" id="edit_assign_custom"
-                                    class="form-control mt-2" placeholder="Enter new assignee" style="display:none;">
                             </div>
-                            <div class="mb-3">
-                                <label for="edit_remark" class="form-label">Remark</label>
-                                <textarea name="remark" id="edit_remark" class="form-control" rows="3"
-                                    placeholder="Enter a remark when closing or cancelling"></textarea>
+                            <div class="col-md-4">
+                                <label>Staff Code</label>
+                                <input type="text" id="staffcode" name="informant_staffcode" class="form-control"
+                                    placeholder="Type your staff code" list="staffcodeList" required>
+                                <datalist id="staffcodeList">
+                                    <?php foreach ($hrmUsers as $u): ?>
+                                        <option value="<?= htmlspecialchars($u['staffcode']) ?>">
+                                        <?php endforeach; ?>
+                                </datalist>
+                            </div>
+                            <div class="col-md-4">
+                                <label>Name</label>
+                                <input type="text" id="informant_name" name="informant_name" class="form-control"
+                                    readonly required>
+                            </div>
+                            <div class="col-md-4 mt-3">
+                                <label>Department</label>
+                                <input type="text" id="informant_department" name="informant_department"
+                                    class="form-control" readonly required>
                             </div>
                         </div>
-                        <div class="modal-footer">
-                            <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                            <button type="submit" class="btn btn-primary">Save changes</button>
+                        <div class="row g-3 mt-3">
+                            <div class="col-md-12">
+                                <label>Description</label>
+                                <textarea name="description" class="form-control" rows="4"
+                                    placeholder="Describe the incident" required></textarea>
+                            </div>
                         </div>
-                    </form>
-                </div>
+                        <div class="mb-3 mt-3">
+                            <label for="photos" class="form-label">Upload Photos</label>
+                            <input class="form-control" type="file" name="photos[]" id="photos" accept="image/*"
+                                multiple>
+                            <div class="form-text">
+                                Select one or more images (JPEG/PNG).
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="submit" class="btn btn-primary">Submit Incident</button>
+                    </div>
+                </form>
             </div>
         </div>
-
-        <!-- JS -->
-        <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-        <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
-        <script src="https://cdn.datatables.net/1.13.4/js/dataTables.bootstrap5.min.js"></script>
-        <script>
-            $(document).ready(function () {
-                // ─── DataTables init ───────────────────────────────────────────
-                $('#incidentTable').DataTable({
-                    dom:
-                        '<"row mb-3"<"col-sm-6"l><"col-sm-6"f>>' +
-                        '<"table-responsive"t>' +
-                        '<"row mt-3"<"col-sm-5"i><"col-sm-7"p>>',
-                    scrollX: true,
-                    lengthMenu: [[5, 10, 25, 50], [5, 10, 25, 50]],
-                    pageLength: 10,
-                    ordering: true,
-                    order: [[0, 'desc']],
-                    columnDefs: [{ orderable: false, targets: -1 }]
-                });
-
-                // ─── staffcode → auto-fill name & dept ──────────────────────────
-                const hrmData = <?php echo json_encode($hrmUsers ?? [], JSON_HEX_TAG); ?>;
-                $('#staffcode').on('input change', function () {
-                    const code = this.value,
-                        user = hrmData.find(u => u.staffcode === code);
-                    $('#informant_name').val(user ? user.name : '');
-                    $('#informant_department').val(user ? user.branch_name : '');
-                });
-
-                // ─── View-modal ─────────────────────────────────────────────────
-                $('.view-btn').on('click', function () {
-                    const btn = $(this);
-                    const photos = JSON.parse(btn.attr('data-photos') || '[]');
-
-                    $('#view-id').text(btn.data('id'));
-                    $('#view-problem').text(btn.data('problem'));
-                    $('#view-custom').text(btn.data('custom'));
-                    $('#view-severity').text(btn.data('severity'));
-                    $('#view-informant').text(btn.data('informant'));
-                    $('#view-dept').text(btn.data('department'));
-                    $('#view-description').text(btn.data('description'));
-                    $('#view-created').text(btn.data('created'));
-                    $('#view-status').text(btn.data('status'));
-                    $('#view-assign').text(btn.data('assign'));
-                    $('#view-assigned_at').text(btn.data('assigned_at'));
-                    $('#view-inprogress_at').text(btn.data('inprogress_at'));
-
-                    // render photos thumbnails
-                    let html = '';
-                    photos.forEach(p => {
-                        html += `
-                        <img
-                          src="${p}"
-                          class="img-thumbnail photo-thumb me-1 mb-1"
-                          style="max-height:300px; cursor:pointer;"
-                          alt="Incident Photo"
-                        >
-                      `;
-                    });
-                    $('#view-photos').html(html || '<em>No photos</em>');
-                });
-
-                $(document).on('click', '.photo-thumb', function () {
-                    const src = $(this).attr('src');
-                    $('#photoModalImg').attr('src', src);
-                    new bootstrap.Modal($('#photoModal')).show();
-                });
-
-                // ─── Edit-modal ────────────────────────────────────────────────
-                $('.edit-btn').on('click', function () {
-                    const btn = $(this),
-                        id = btn.data('id'),
-                        status = btn.data('status'),
-                        assign = btn.data('assign'),
-                        remark = btn.data('remark') || '';
-
-                    $('#edit_update_id').val(id);
-                    $('#edit_status').val(status);
-                    $('#edit_assign_to').val(
-                        (!assign || ['', 'Open', 'In Progress', 'Closed', 'Cancelled'].includes(assign))
-                            ? assign
-                            : '__other__'
-                    );
-                    if (assign && !['', 'Open', 'In Progress', 'Closed', 'Cancelled'].includes(assign)) {
-                        $('#edit_assign_custom').show().val(assign);
-                    } else {
-                        $('#edit_assign_custom').hide().val('');
-                    }
-
-                    $('#edit_remark').val(remark);
-                    if (['Closed', 'Cancelled'].includes(status)) {
-                        $('#edit_remark_group').show();
-                    } else {
-                        $('#edit_remark_group').hide();
-                    }
-
-                    new bootstrap.Modal($('#editIncidentModal')).show();
-                });
-
-                $('#edit_status').on('change', function () {
-                    if (['Closed', 'Cancelled'].includes(this.value)) {
-                        $('#edit_remark_group').show().find('textarea').focus();
-                    } else {
-                        $('#edit_remark_group').hide();
-                    }
-                });
-
-            });
-        </script>
-        <!-- sidebar toggle script: -->
-        <script>
-            document.addEventListener('DOMContentLoaded', function () {
-                const sidebar = document.getElementById('sidebar');
-                const container = document.getElementById('container');
-                const wasExpanded = localStorage.getItem('sidebarExpanded') === 'true';
-                if (wasExpanded) {
-                    sidebar.classList.add('expanded');
-                    container.classList.add('expanded');
-                }
-                sidebar.querySelector('h2').addEventListener('click', function () {
-                    const expanded = sidebar.classList.toggle('expanded');
-                    container.classList.toggle('expanded');
-                    localStorage.setItem('sidebarExpanded', expanded);
-                });
-            });
-        </script>
     </div>
+
+    <!-- View Incident Modal -->
+    <div class="modal fade" id="viewModal" tabindex="-1" aria-labelledby="viewModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Incident Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <dl class="row">
+                        <dt class="col-sm-3">ID</dt>
+                        <dd class="col-sm-9" id="view-id"></dd>
+                        <dt class="col-sm-3">Type</dt>
+                        <dd class="col-sm-9" id="view-problem"></dd>
+                        <dt class="col-sm-3">Custom</dt>
+                        <dd class="col-sm-9" id="view-custom"></dd>
+                        <dt class="col-sm-3">Severity</dt>
+                        <dd class="col-sm-9" id="view-severity"></dd>
+                        <dt class="col-sm-3">Informant</dt>
+                        <dd class="col-sm-9" id="view-informant"></dd>
+                        <dt class="col-sm-3">Dept.</dt>
+                        <dd class="col-sm-9" id="view-dept"></dd>
+                        <dt class="col-sm-3">Description</dt>
+                        <dd class="col-sm-9" id="view-description"></dd>
+                        <dt class="col-sm-3">Created At</dt>
+                        <dd class="col-sm-9" id="view-created"></dd>
+                        <dt class="col-sm-3">Status</dt>
+                        <dd class="col-sm-9" id="view-status"></dd>
+                        <dt class="col-sm-3">Assigned To</dt>
+                        <dd class="col-sm-9" id="view-assign"></dd>
+                        <dt class="col-sm-3">Assigned At</dt>
+                        <dd class="col-sm-9" id="view-assigned_at"></dd>
+                        <dt class="col-sm-3">In Progress</dt>
+                        <dd class="col-sm-9" id="view-inprogress_at"></dd>
+                        <dt class="col-sm-3">Photos</dt>
+                        <dd class="col-sm-9" id="view-photos"><em>No photos</em></dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Full-Screen Photo Preview Modal -->
+    <div class="modal fade" id="photoModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-fullscreen">
+            <div class="modal-content bg-dark">
+                <div class="modal-header border-0">
+                    <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal"
+                        aria-label="Close"></button>
+                </div>
+                <div class="modal-body d-flex justify-content-center align-items-center p-0">
+                    <img src="" id="photoModalImg" class="img-fluid" style="max-height:100vh; width:auto;"
+                        alt="Incident Photo">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Incident Modal -->
+    <div class="modal fade" id="editIncidentModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="post" id="editIncidentForm">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Edit Incident</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <input type="hidden" name="update_id" id="edit_update_id">
+                        <div class="mb-3">
+                            <label>Status</label>
+                            <select name="status" id="edit_status" class="form-select">
+                                <option>Open</option>
+                                <option>In Progress</option>
+                                <option>Closed</option>
+                                <option>Cancelled</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label>Assigned To</label>
+                            <select name="assign_to" id="edit_assign_to" class="form-select">
+                                <option value="">-- Unassigned --</option>
+                                <?php foreach ($assignees as $a): ?>
+                                    <option value="<?= htmlspecialchars($a) ?>"><?= htmlspecialchars($a) ?></option>
+                                <?php endforeach; ?>
+                                <option value="__other__">Other…</option>
+                            </select>
+                            <input type="text" name="assign_custom" id="edit_assign_custom" class="form-control mt-2"
+                                placeholder="Enter new assignee" style="display:none;">
+                        </div>
+                        <div class="mb-3" id="edit_remark_group" style="display: none;">
+                            <label for="edit_remark" class="form-label">Remark</label>
+                            <textarea name="remark" id="edit_remark" class="form-control" rows="3"
+                                placeholder="Enter a remark when closing or cancelling"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- JS -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/dataTables.bootstrap5.min.js"></script>
+    <script src="https://cdn.datatables.net/responsive/2.4.1/js/dataTables.responsive.min.js"></script>
+    <script src="https://cdn.datatables.net/responsive/2.4.1/js/responsive.bootstrap5.min.js"></script>
+    <script>
+        $(document).ready(function () {
+            // ─── Sidebar toggle (unchanged) ────────────────────────────────────
+            const sb = document.getElementById('sidebar'),
+                ct = document.getElementById('container'),
+                exp = localStorage.getItem('sidebarExpanded') === 'true';
+            if (exp) sb.classList.add('expanded'), ct.classList.add('expanded');
+            sb.querySelector('h2').addEventListener('click', () => {
+                const e = sb.classList.toggle('expanded');
+                ct.classList.toggle('expanded');
+                localStorage.setItem('sidebarExpanded', e);
+            });
+
+            // ─── DataTable init (full-width like Add Incident page) ────────────
+            $('#incidentTable').DataTable({
+                dom:
+                    '<"row mb-3"<"col-sm-6"l><"col-sm-6"f>>' +
+                    '<"table-responsive"t>' +
+                    '<"row mt-3"<"col-sm-5"i><"col-sm-7"p>>',
+
+                responsive: false,
+                scrollX: true,
+                // responsive: {
+                //     details: {
+                //         type: 'inline'
+                //     }
+                // },
+                autoWidth: false,
+                paging: true,
+                lengthChange: true,
+                lengthMenu: [[5, 10, 25, 50], [5, 10, 25, 50]],
+                pageLength: 10,
+                ordering: true,
+                order: [[0, 'desc']],
+                columnDefs: [{ orderable: false, targets: -1 }]
+            });
+
+            // ─── staffcode → auto-fill name & department ────────────────────────
+            const hrmData = <?= json_encode($hrmUsers, JSON_HEX_TAG) ?>;
+            $('#staffcode').on('input change', function () {
+                const code = this.value,
+                    u = hrmData.find(x => x.staffcode === code);
+                $('#informant_name').val(u ? u.name : '');
+                $('#informant_department').val(u ? u.branch_name : '');
+            });
+
+            // ─── Delegate View-modal ───────────────────────────────────────────
+            $('#incidentTable').on('click', '.view-btn', function () {
+                const btn = $(this),
+                    photos = JSON.parse(btn.attr('data-photos') || '[]');
+
+                $('#view-id').text(btn.data('id'));
+                $('#view-problem').text(btn.data('problem'));
+                $('#view-custom').text(btn.data('custom'));
+                $('#view-severity').text(btn.data('severity'));
+                $('#view-informant').text(btn.data('informant'));
+                $('#view-dept').text(btn.data('department'));
+                $('#view-description').text(btn.data('description'));
+                $('#view-created').text(btn.data('created'));
+                $('#view-status').text(btn.data('status'));
+                $('#view-assign').text(btn.data('assign'));
+                $('#view-assigned_at').text(btn.data('assigned_at'));
+                $('#view-inprogress_at').text(btn.data('inprogress_at'));
+
+                let html = '';
+                photos.forEach(p => {
+                    html += `
+                <img
+                  src="${p}"
+                  class="img-thumbnail photo-thumb me-1 mb-1"
+                  style="max-height:300px; cursor:pointer;"
+                  alt="Incident Photo"
+                >
+            `;
+                });
+                $('#view-photos').html(html || '<em>No photos</em>');
+            });
+
+            // ─── Click on a thumbnail to open full-screen modal ────────────────
+            $(document).on('click', '.photo-thumb', function () {
+                const src = $(this).attr('src');
+                $('#photoModalImg').attr('src', src);
+                new bootstrap.Modal($('#photoModal')).show();
+            });
+
+            // ─── Delegate Edit-modal populator ─────────────────────────────
+            $('#incidentTable tbody').on('click', '.edit-btn', function () {
+                const btn = $(this),
+                    id = btn.data('id') || '',
+                    status = btn.data('status') || '',
+                    assign = btn.data('assign') || '',
+                    remark = btn.data('remark') || '';
+
+                // 1) Populate the hidden ID, status & remark
+                $('#edit_update_id').val(id);
+                $('#edit_status').val(status).trigger('change');
+                $('#edit_remark').val(remark);
+
+                // 2) See if we have an <option> for this assign value already
+                const $sel = $('#edit_assign_to'),
+                    $other = $('#edit_assign_custom'),
+                    hasOpt = $sel.find(`option[value="${assign}"]`).length > 0;
+
+                if (hasOpt) {
+                    // it’s one of your existing names
+                    $sel.val(assign);
+                    $other.hide().val('');
+                }
+                else if (assign) {
+                    // a custom name
+                    $sel.val('__other__');
+                    $other.show().val(assign);
+                }
+                else {
+                    // unassigned
+                    $sel.val('');
+                    $other.hide().val('');
+                }
+
+                // 3) Fire the modal
+                new bootstrap.Modal($('#editIncidentModal')).show();
+            });
+
+
+            // when user picks “Other…”
+            $('#edit_assign_to').on('change', function () {
+                if (this.value === '__other__') {
+                    $('#edit_assign_custom').show().focus();
+                } else {
+                    $('#edit_assign_custom').hide().val('');
+                }
+            });
+
+
+        });
+    </script>
+
+    <!-- sidebar toggle script: -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const sidebar = document.getElementById('sidebar');
+            const container = document.getElementById('container');
+            const wasExpanded = localStorage.getItem('sidebarExpanded') === 'true';
+            if (wasExpanded) {
+                sidebar.classList.add('expanded');
+                container.classList.add('expanded');
+            }
+            sidebar.querySelector('h2').addEventListener('click', function () {
+                const expanded = sidebar.classList.toggle('expanded');
+                container.classList.toggle('expanded');
+                localStorage.setItem('sidebarExpanded', expanded);
+            });
+        });
+    </script>
+
 </body>
 
 </html>

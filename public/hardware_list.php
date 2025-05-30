@@ -1,72 +1,165 @@
 <?php
+// hardware_list.php
 ini_set('display_errors', 1);
 error_reporting(E_ALL);
 session_start();
+date_default_timezone_set('Asia/Bangkok');
 
 include __DIR__ . '/db_config.php';
-$db = getDb('itd');
 
+// ─── 1) Open both ITD & HRM DBs ─────────────────────────────────────────
+$dbItd = getDb('itd');
+$dbHrm = getDb('hrm');
 
-$editItem = null;
-if (isset($_GET['edit_id'])) {
-    $stmt = $db->prepare("SELECT * FROM hardware WHERE id = ?");
-    $stmt->execute([$_GET['edit_id']]);
-    $editItem = $stmt->fetch();
+// ─── 2) Pull HRM users (staffcode, full name, branch) ───────────────────
+$hrmUsers = $dbHrm->query("
+    SELECT 
+      u.staffcode,
+      CONCAT(u.firstname,' ',u.lastname) AS name,
+      CASE
+        WHEN u.branch_id = 1 THEN 'Q.A'
+        WHEN u.branch_id = 2 THEN 'BOX 1'
+        WHEN u.branch_id = 3 THEN 'BOX 2'
+        /* … add all your other WHENs … */
+        WHEN u.branch_id = 93 THEN 'ผู้จัดการควบคุมคุณภาพ'
+        ELSE 'ไม่ระบุ'
+      END AS branch_name
+    FROM users u
+    ORDER BY u.firstname, u.lastname
+")->fetchAll(PDO::FETCH_ASSOC);
+
+// build map for lookups
+$hrmMap = [];
+foreach ($hrmUsers as $u) {
+    $hrmMap[$u['staffcode']] = [
+        'name' => $u['name'],
+        'branch_name' => $u['branch_name'],
+    ];
 }
 
-
-// Process insertion if form submitted
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $name = trim($_POST['name']);
-    $type = trim($_POST['type']);
-    $description = trim($_POST['description']);
-    $userName = trim($_POST['user_name']);
-
-    if (!empty($_POST['edit_id'])) {
-        // → update existing
-        $stmt = $db->prepare("
-          UPDATE hardware
-             SET name        = ?,
-                 type        = ?,
-                 description = ?,
-                 user_name   = ?
-           WHERE id = ?
-        ");
-        $stmt->execute([$name, $type, $description, $userName, $_POST['edit_id']]);
+// ─── 3) Handle GET edit for hardware or software ─────────────────────────
+$editType = null;
+$editItem = null;
+if (!empty($_GET['edit_type']) && in_array($_GET['edit_type'], ['hardware', 'software'], true)) {
+    $editType = $_GET['edit_type'];
+    $editId = (int) $_GET['edit_id'];
+    if ($editType === 'hardware') {
+        $stmt = $dbItd->prepare("SELECT * FROM hardware WHERE id = ?");
+        $stmt->execute([$editId]);
+        $editItem = $stmt->fetch(PDO::FETCH_ASSOC);
     } else {
-        // → new insert
-        $stmt = $db->prepare("
-          INSERT INTO hardware (name, type, description, user_name)
-          VALUES (?, ?, ?, ?)
-        ");
-        $stmt->execute([$name, $type, $description, $userName]);
+        $stmt = $dbItd->prepare("SELECT * FROM software_licenses WHERE id = ?");
+        $stmt->execute([$editId]);
+        $editItem = $stmt->fetch(PDO::FETCH_ASSOC);
     }
+}
+
+// ─── 4) Handle POST insert/update ───────────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $assetType = $_POST['asset_type'] ?? '';
+    $staffcode = trim($_POST['staffcode'] ?? '');
+
+    if ($assetType === 'hardware') {
+        $name = trim($_POST['name']);
+        $type = trim($_POST['type']);
+        $description = trim($_POST['description']);
+        if (!empty($_POST['edit_id'])) {
+            $stmt = $dbItd->prepare("
+                UPDATE hardware
+                   SET name        = ?,
+                       type        = ?,
+                       description = ?,
+                       user_name   = ?
+                 WHERE id = ?
+            ");
+            $stmt->execute([$name, $type, $description, $staffcode, $_POST['edit_id']]);
+        } else {
+            $stmt = $dbItd->prepare("
+                INSERT INTO hardware
+                  (name,type,description,user_name)
+                VALUES (?,?,?,?)
+            ");
+            $stmt->execute([$name, $type, $description, $staffcode]);
+        }
+    } elseif ($assetType === 'software') {
+        $softwareName = trim($_POST['software_name']);
+        $licenseKey = trim($_POST['license_key']);
+        if (!empty($_POST['edit_id'])) {
+            $stmt = $dbItd->prepare("
+                UPDATE software_licenses
+                   SET software_name = ?,
+                       license_key   = ?,
+                       user_name     = ?
+                 WHERE id = ?
+            ");
+            $stmt->execute([$softwareName, $licenseKey, $staffcode, $_POST['edit_id']]);
+        } else {
+            $stmt = $dbItd->prepare("
+                INSERT INTO software_licenses
+                  (software_name,license_key,user_name)
+                VALUES (?,?,?)
+            ");
+            $stmt->execute([$softwareName, $licenseKey, $staffcode]);
+        }
+    }
+
     header('Location: hardware_list.php');
     exit;
 }
 
-$stmt = $db->query("
-  SELECT id, name, type, description, user_name
-  FROM hardware
-  ORDER BY id ASC
+// ─── 5) Load all hardware & software entries ────────────────────────────
+$hardwareItems = $dbItd
+    ->query("SELECT id,name,type,description,user_name FROM hardware ORDER BY id")
+    ->fetchAll(PDO::FETCH_ASSOC);
+
+$softwareItems = $dbItd
+    ->query("SELECT id,software_name,license_key,user_name FROM software_licenses ORDER BY id")
+    ->fetchAll(PDO::FETCH_ASSOC);
+
+// prepare once for software lookup under hardware
+$softStmt = $dbItd->prepare("
+    SELECT software_name, license_key
+      FROM software_licenses
+     WHERE user_name = ?
 ");
-$hardwareItems = $db
-    ->query("SELECT id, name, type, description, user_name FROM hardware ORDER BY id")
-    ->fetchAll();
+
+// enrich hardware rows
+foreach ($hardwareItems as &$h) {
+    $code = $h['user_name'];
+    if (isset($hrmMap[$code])) {
+        $h['hrm_name'] = $hrmMap[$code]['name'];
+        $h['hrm_branch'] = $hrmMap[$code]['branch_name'];
+    } else {
+        $h['hrm_name'] = '(not found)';
+        $h['hrm_branch'] = '';
+    }
+    $softStmt->execute([$code]);
+    $h['licenses'] = $softStmt->fetchAll(PDO::FETCH_ASSOC);
+}
+unset($h);
+
+// enrich software rows
+foreach ($softwareItems as &$s) {
+    $code = $s['user_name'];
+    if (isset($hrmMap[$code])) {
+        $s['hrm_name'] = $hrmMap[$code]['name'];
+        $s['hrm_branch'] = $hrmMap[$code]['branch_name'];
+    } else {
+        $s['hrm_name'] = '(not found)';
+        $s['hrm_branch'] = '';
+    }
+}
+unset($s);
 ?>
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
-    <title>Computer & Hardware List</title>
-    <!-- <link rel="stylesheet" href="style.css"> -->
-    <!-- FontAwesome for icons -->
+    <title>Assets: Hardware & Software</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-
     <style>
-        /* Global resets */
-        * {
+        {
             box-sizing: border-box;
         }
 
@@ -141,17 +234,22 @@ $hardwareItems = $db
             opacity: 1;
         }
 
-        /* Main container styles */
-        .container {
+        .container-fluid {
             margin-left: 50px;
-            width: calc(100% - 50px);
-            transition: margin-left 0.3s ease, width 0.3s ease;
             padding: 20px;
+            transition: margin-left .3s ease;
+            width: calc(100% - 50px);
+
         }
 
-        .container.expanded {
+        .container-fluid.expanded {
             margin-left: 250px;
             width: calc(100% - 250px);
+        }
+
+        .container-fluid>.card {
+            width: 100%;
+
         }
 
         .main-content {
@@ -216,13 +314,11 @@ $hardwareItems = $db
             white-space: nowrap;
         }
     </style>
-    <!-- jQuery and DataTables -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script type="text/javascript" src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
 </head>
 
 <body>
-    <!-- sidebar -->
     <div class="sidebar" id="sidebar">
         <h2><i class="fas fa-bars"></i></h2>
         <a href="dashboard.php"><i class="fas fa-tachometer-alt"></i><span class="link-text">Dashboard</span></a>
@@ -234,41 +330,96 @@ $hardwareItems = $db
         <a href="logout.php"><i class="fas fa-sign-out-alt"></i><span class="link-text">Logout</span></a>
     </div>
 
-
-    <div class="container" id="container">
+    <div class="container-fluid" id="container">
         <div class="main-content">
-            <h1>Hardware List</h1>
+            <h1>Assets Management</h1>
 
-            <!-- Add-Hardware Form -->
             <form class="hardware-form" method="post" action="">
-                <h3><?= $editItem ? 'Edit Hardware #' . $editItem['id'] : 'Add New Hardware' ?></h3>
+                <h3>
+                    <?= $editType === 'software'
+                        ? 'Edit Software #' . $editItem['id']
+                        : ($editType === 'hardware'
+                            ? 'Edit Hardware #' . $editItem['id']
+                            : 'Add New Asset') ?>
+                </h3>
 
-                <!-- if editing, carry the ID -->
-                <?php if ($editItem): ?>
+                <?php if ($editType): ?>
                     <input type="hidden" name="edit_id" value="<?= $editItem['id'] ?>">
+                    <input type="hidden" name="asset_type" id="asset_type" value="<?= $editType ?>">
+                <?php else: ?>
+                    <div class="field-group">
+                        <label for="asset_type">Asset Type:</label>
+                        <select name="asset_type" id="asset_type" required>
+                            <option value="">-- select type --</option>
+                            <option value="hardware">Hardware</option>
+                            <option value="software">Software</option>
+                        </select>
+                    </div>
                 <?php endif; ?>
 
-                <input name="name" placeholder="Hardware Name" required
-                    value="<?= htmlspecialchars($editItem['name'] ?? '') ?>">
-                <input name="type" placeholder="Hardware Type" required
-                    value="<?= htmlspecialchars($editItem['type'] ?? '') ?>">
-                <textarea name="description" placeholder="Description" rows="2"
-                    required><?= htmlspecialchars($editItem['description'] ?? '') ?></textarea>
+                <!-- hardware fields -->
+                <div id="hardware_fields" style="display:none;">
+                    <div class="field-group">
+                        <label for="name">Hardware Name:</label>
+                        <input name="name" id="name" placeholder="Name"
+                            value="<?= htmlspecialchars($editItem['name'] ?? '') ?>">
+                    </div>
+                    <div class="field-group">
+                        <label for="type">Hardware Type:</label>
+                        <input name="type" id="type" placeholder="Type"
+                            value="<?= htmlspecialchars($editItem['type'] ?? '') ?>">
+                    </div>
+                    <div class="field-group">
+                        <label for="description">Description:</label>
+                        <textarea name="description" id="description"
+                            rows="2"><?= htmlspecialchars($editItem['description'] ?? '') ?></textarea>
+                    </div>
+                </div>
 
-                <input name="user_name" placeholder="Assigned User Name" required
-                    value="<?= htmlspecialchars($editItem['user_name'] ?? '') ?>">
+                <!-- software fields -->
+                <div id="software_fields" style="display:none;">
+                    <div class="field-group">
+                        <label for="software_name">Software Name:</label>
+                        <input name="software_name" id="software_name" placeholder="Name"
+                            value="<?= htmlspecialchars($editItem['software_name'] ?? '') ?>">
+                    </div>
+                    <div class="field-group">
+                        <label for="license_key">License Key:</label>
+                        <input name="license_key" id="license_key" placeholder="Key"
+                            value="<?= htmlspecialchars($editItem['license_key'] ?? '') ?>">
+                    </div>
+                </div>
+
+                <!-- common staffcode -->
+                <div class="field-group">
+                    <label for="staffcode">Assign to Staff:</label>
+                    <select name="staffcode" id="staffcode" required>
+                        <option value="">-- select staff --</option>
+                        <?php foreach ($hrmUsers as $u): ?>
+                            <option value="<?= htmlspecialchars($u['staffcode']) ?>" <?= isset($editItem['user_name']) && $editItem['user_name'] == $u['staffcode']
+                                  ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($u['name']) ?>
+                                (<?= htmlspecialchars($u['staffcode']) ?> /
+                                <?= htmlspecialchars($u['branch_name']) ?>)
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
 
                 <button type="submit">
-                    <?= $editItem ? 'Update Hardware' : 'Add Hardware' ?>
+                    <?= $editType === 'software'
+                        ? 'Save Software'
+                        : ($editType === 'hardware'
+                            ? 'Save Hardware'
+                            : 'Add Asset') ?>
                 </button>
-
-                <?php if ($editItem): ?>
+                <?php if ($editType): ?>
                     <a href="hardware_list.php" style="margin-left:10px">Cancel</a>
                 <?php endif; ?>
             </form>
 
-
-            <!-- Hardware Table -->
+            <!-- ▼ Hardware Table ▼ -->
+            <h2>Hardware List</h2>
             <div class="table-wrapper">
                 <table id="hardwareTable" class="display nowrap" style="width:100%">
                     <thead>
@@ -277,36 +428,97 @@ $hardwareItems = $db
                             <th>Name</th>
                             <th>Type</th>
                             <th>Description</th>
-                            <th>Assigned User</th>
-                            <th>Actions</th>
+                            <th>Staffcode</th>
+                            <th>Name</th>
+                            <th>Branch</th>
+                            <th>Licenses</th>
+                            <th>Action</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php foreach ($hardwareItems as $h): ?>
                             <tr>
-                                <td><?= htmlspecialchars($h['id']) ?></td>
+                                <td><?= $h['id'] ?></td>
                                 <td><?= htmlspecialchars($h['name']) ?></td>
                                 <td><?= htmlspecialchars($h['type']) ?></td>
                                 <td><?= htmlspecialchars($h['description']) ?></td>
                                 <td><?= htmlspecialchars($h['user_name']) ?></td>
-                                <td><a href="?edit_id=<?= $h['id'] ?>">Edit</a></td>
+                                <td><?= htmlspecialchars($h['hrm_name']) ?></td>
+                                <td><?= htmlspecialchars($h['hrm_branch']) ?></td>
+                                <td>
+                                    <?php if ($h['licenses']): ?>
+                                        <ul style="margin:0;padding-left:1em;">
+                                            <?php foreach ($h['licenses'] as $s): ?>
+                                                <li>
+                                                    <?= htmlspecialchars($s['software_name']) ?>
+                                                    (<?= htmlspecialchars($s['license_key']) ?>)
+                                                </li>
+                                            <?php endforeach; ?>
+                                        </ul>
+                                    <?php else: ?>
+                                        —
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <a href="?edit_type=hardware&edit_id=<?= $h['id'] ?>">Edit</a>
+                                </td>
                             </tr>
-
                         <?php endforeach; ?>
                     </tbody>
                 </table>
             </div>
+
+            <!-- ▼ Software Table ▼ -->
+            <h2>Software Licenses</h2>
+            <div class="table-wrapper">
+                <table id="softwareTable" class="display nowrap" style="width:100%">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Software</th>
+                            <th>Key</th>
+                            <th>Staffcode</th>
+                            <th>Name</th>
+                            <th>Branch</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($softwareItems as $s): ?>
+                            <tr>
+                                <td><?= $s['id'] ?></td>
+                                <td><?= htmlspecialchars($s['software_name']) ?></td>
+                                <td><?= htmlspecialchars($s['license_key']) ?></td>
+                                <td><?= htmlspecialchars($s['user_name']) ?></td>
+                                <td><?= htmlspecialchars($s['hrm_name']) ?></td>
+                                <td><?= htmlspecialchars($s['hrm_branch']) ?></td>
+                                <td>
+                                    <a href="?edit_type=software&edit_id=<?= $s['id'] ?>">Edit</a>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+
         </div>
     </div>
 
-    <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
     <script>
         $(function () {
-            $('#hardwareTable').DataTable({
-                scrollX: true,
-                pageLength: 10,
-                order: [[0, 'asc']]
-            });
+            // DataTables
+            $('#hardwareTable').DataTable({ scrollX: true, pageLength: 10, order: [[0, 'asc']] });
+            $('#softwareTable').DataTable({ scrollX: true, pageLength: 10, order: [[0, 'asc']] });
+
+            // show/hide form sections
+            function toggleFields() {
+                const t = $('#asset_type').val();
+                $('#hardware_fields').toggle(t === 'hardware');
+                $('#software_fields').toggle(t === 'software');
+            }
+            $('#asset_type').on('change', toggleFields);
+            toggleFields();  // on load, esp. for edit
+
         });
     </script>
 

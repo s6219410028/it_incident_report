@@ -161,22 +161,20 @@ $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
             opacity: 1;
         }
 
-        .container {
+        .container-fluid {
             margin-left: 50px;
             padding: 20px;
-            transition: margin-left .3s, width .3s;
-            overflow-x: auto;
+            transition: margin-left .3s ease;
             width: calc(100% - 50px);
 
         }
 
-        .container.expanded {
+        .container-fluid.expanded {
             margin-left: 250px;
             width: calc(100% - 250px);
         }
 
-        .container>.card {
-            margin: 1rem 0;
+        .container-fluid>.card {
             width: 100%;
 
         }
@@ -210,7 +208,7 @@ $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <a href="logout.php"><i class="fas fa-sign-out-alt"></i><span class="link-text">Logout</span></a>
     </div>
 
-    <div class="container" id="container">
+    <div class="container-fluid" id="container">
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="fas fa-circle-check me-2"></i>Resolved Incidents</h5>
