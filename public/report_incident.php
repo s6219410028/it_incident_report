@@ -1,5 +1,4 @@
 <?php
-// report_incident.php
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
@@ -9,14 +8,13 @@ session_start();
 include __DIR__ . '/db_config.php';
 $db = getDb('itd');
 
-// ─── pull HRM users for staffcode lookup ─────────────────────────────────
 $hrm = getDb('hrm');
 $hrmUsers = $hrm->query("
     SELECT 
       u.staffcode,
       CONCAT(u.firstname,' ',u.lastname) AS name,
       CASE
-        WHEN u.branch_id = 1 THEN 'Q.A'
+        WHEN u.branch_id = 1 THEN 'Q.A.'
 		WHEN u.branch_id = 2 THEN 'BOX 1'
 		WHEN u.branch_id = 3 THEN 'BOX 2'
 		WHEN u.branch_id = 4  THEN 'BOX 3'
@@ -144,14 +142,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                            remark     = ?";
         $params = [$now, $status, $assign, $remark];
 
-        // conditional timestamps
         if ($status === 'Open') {
-            // someone set it back to Open → stamp assigned_at
             $sql .= ", assigned_at = ?";
             $params[] = $now;
         }
         if ($status === 'In Progress') {
-            // **NEW**: stamp both assigned_at & inprogress_at
             $sql .= ", assigned_at = ?, inprogress_at = ?";
             $params[] = $now;
             $params[] = $now;
@@ -171,7 +166,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     } else {
         $now = date('Y-m-d H:i:s');
-        // a) insert incident (assigned_at left NULL)
         $stmt = $db->prepare("
             INSERT INTO incidents
               (problem_type, custom_problem, severity,
@@ -188,10 +182,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_POST['informant_department'] ?? '',
         ]);
 
-        // b) grab new incident ID
         $incidentId = $db->lastInsertId();
 
-        // c) handle photo uploads
         if (!empty($_FILES['photos']['tmp_name']) && is_array($_FILES['photos']['tmp_name'])) {
             $uploadDir = __DIR__ . '/uploads/';
             if (!is_dir($uploadDir))
@@ -214,14 +206,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // redirect to clear POST
     header('Location: report_incident.php');
     exit;
 }
 
 
-
-// ─── Fetch only Open & In Progress incidents for display ───────────
 $incidents = $db->query("
     SELECT 
       i.id,
@@ -257,7 +246,6 @@ $incidents = $db->query("
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.4.1/css/responsive.bootstrap5.min.css" />
     <style>
-        /* Severity badges */
         .badge-severity {
             display: inline-block;
             padding: .25em .6em;
@@ -268,7 +256,6 @@ $incidents = $db->query("
             white-space: nowrap;
         }
 
-        /* 1 = green, 2 = blue, 3 = yellow, 4 = orange, 5 = red */
         .badge-severity-1 {
             background-color: #007bff;
         }
@@ -314,7 +301,16 @@ $incidents = $db->query("
             font-family: Arial, sans-serif;
         }
 
-        /* Sidebar styles */
+        .sidebar a,
+        .sidebar a i {
+            line-height: 18px;
+        }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+
         .sidebar {
             position: fixed;
             top: 0;
@@ -326,11 +322,6 @@ $incidents = $db->query("
             overflow: hidden;
             transition: width 0.3s ease;
             z-index: 1000;
-        }
-
-        .sidebar a,
-        .sidebar a i {
-            line-height: 18px;
         }
 
         .sidebar.expanded {
@@ -718,7 +709,6 @@ $incidents = $db->query("
     <script src="https://cdn.datatables.net/responsive/2.4.1/js/responsive.bootstrap5.min.js"></script>
     <script>
         $(document).ready(function () {
-            // ─── Sidebar toggle (unchanged) ────────────────────────────────────
             const sb = document.getElementById('sidebar'),
                 ct = document.getElementById('container'),
                 exp = localStorage.getItem('sidebarExpanded') === 'true';
@@ -729,7 +719,6 @@ $incidents = $db->query("
                 localStorage.setItem('sidebarExpanded', e);
             });
 
-            // ─── DataTable init (full-width like Add Incident page) ────────────
             $('#incidentTable').DataTable({
                 dom:
                     '<"row mb-3"<"col-sm-6"l><"col-sm-6"f>>' +
@@ -753,7 +742,6 @@ $incidents = $db->query("
                 columnDefs: [{ orderable: false, targets: -1 }]
             });
 
-            // ─── staffcode → auto-fill name & department ────────────────────────
             const hrmData = <?= json_encode($hrmUsers, JSON_HEX_TAG) ?>;
             $('#staffcode').on('input change', function () {
                 const code = this.value,
@@ -762,7 +750,6 @@ $incidents = $db->query("
                 $('#informant_department').val(u ? u.branch_name : '');
             });
 
-            // ─── Delegate View-modal ───────────────────────────────────────────
             $('#incidentTable').on('click', '.view-btn', function () {
                 const btn = $(this),
                     photos = JSON.parse(btn.attr('data-photos') || '[]');
@@ -794,14 +781,12 @@ $incidents = $db->query("
                 $('#view-photos').html(html || '<em>No photos</em>');
             });
 
-            // ─── Click on a thumbnail to open full-screen modal ────────────────
             $(document).on('click', '.photo-thumb', function () {
                 const src = $(this).attr('src');
                 $('#photoModalImg').attr('src', src);
                 new bootstrap.Modal($('#photoModal')).show();
             });
 
-            // ─── Delegate Edit-modal populator ─────────────────────────────
             $('#incidentTable tbody').on('click', '.edit-btn', function () {
                 const btn = $(this),
                     id = btn.data('id') || '',
@@ -809,23 +794,21 @@ $incidents = $db->query("
                     assign = btn.data('assign') || '',
                     remark = btn.data('remark') || '';
 
-                // 1) Populate the hidden ID, status & remark
                 $('#edit_update_id').val(id);
                 $('#edit_status').val(status).trigger('change');
                 $('#edit_remark').val(remark);
 
-                // 2) See if we have an <option> for this assign value already
                 const $sel = $('#edit_assign_to'),
                     $other = $('#edit_assign_custom'),
                     hasOpt = $sel.find(`option[value="${assign}"]`).length > 0;
 
                 if (hasOpt) {
-                    // it’s one of your existing names
+                    // one of the existing names
                     $sel.val(assign);
                     $other.hide().val('');
                 }
                 else if (assign) {
-                    // a custom name
+                    // custom name
                     $sel.val('__other__');
                     $other.show().val(assign);
                 }
@@ -835,12 +818,9 @@ $incidents = $db->query("
                     $other.hide().val('');
                 }
 
-                // 3) Fire the modal
                 new bootstrap.Modal($('#editIncidentModal')).show();
             });
 
-
-            // when user picks “Other…”
             $('#edit_assign_to').on('change', function () {
                 if (this.value === '__other__') {
                     $('#edit_assign_custom').show().focus();
@@ -850,24 +830,6 @@ $incidents = $db->query("
             });
 
 
-        });
-    </script>
-
-    <!-- sidebar toggle script: -->
-    <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            const sidebar = document.getElementById('sidebar');
-            const container = document.getElementById('container');
-            const wasExpanded = localStorage.getItem('sidebarExpanded') === 'true';
-            if (wasExpanded) {
-                sidebar.classList.add('expanded');
-                container.classList.add('expanded');
-            }
-            sidebar.querySelector('h2').addEventListener('click', function () {
-                const expanded = sidebar.classList.toggle('expanded');
-                container.classList.toggle('expanded');
-                localStorage.setItem('sidebarExpanded', expanded);
-            });
         });
     </script>
 

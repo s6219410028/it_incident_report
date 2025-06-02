@@ -166,6 +166,7 @@ try {
 
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Employee List</title>
     <!-- DataTables CSS -->
     <link rel="stylesheet" href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css">
@@ -312,7 +313,6 @@ try {
             position: relative;
         }
 
-        /* never break lines in table cells */
         #employeeTable th,
         #employeeTable td {
             white-space: nowrap;
@@ -321,7 +321,7 @@ try {
         #tableWrapper .dataTables_filter {
             float: right;
             margin: 0 0 10px;
-            /* push it a little above the table */
+
         }
     </style>
     <!-- jQuery and DataTables JS -->
