@@ -1,4 +1,6 @@
 <?php
+// report_incident.php
+
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
@@ -8,6 +10,7 @@ session_start();
 include __DIR__ . '/db_config.php';
 $db = getDb('itd');
 
+// ─── pull HRM users for staffcode lookup ─────────────────────────────────
 $hrm = getDb('hrm');
 $hrmUsers = $hrm->query("
     SELECT 
@@ -116,37 +119,43 @@ $hrmUsers = $hrm->query("
 
 $assignees = $db
     ->query("SELECT DISTINCT assign_to
-            FROM incidents
-           WHERE assign_to <> ''
-           ORDER BY assign_to")
+              FROM incidents
+             WHERE assign_to <> ''
+             ORDER BY assign_to")
     ->fetchAll(PDO::FETCH_COLUMN);
 
 
 // ─── Unified POST handler ───────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!empty($_POST['update_id'])) {
+        // — Update existing incident —
         $id = (int) $_POST['update_id'];
         $status = $_POST['status'] ?? 'Open';
         $raw = $_POST['assign_to'] ?? '';
         $assign = $raw === '__other__'
             ? trim($_POST['assign_custom'] ?? '')
             : trim($raw);
+        $comment = trim($_POST['comment'] ?? ''); // ← new
         $remark = trim($_POST['remark'] ?? '');
         $now = date('Y-m-d H:i:s');
 
-        // base UPDATE (always include remark)
+        // base UPDATE (always include updated_at, comment, remark)
         $sql = "UPDATE incidents
-                       SET updated_at = ?,
-                           status     = ?,
-                           assign_to  = ?,
-                           remark     = ?";
-        $params = [$now, $status, $assign, $remark];
+                   SET updated_at = ?,
+                       status     = ?,
+                       assign_to  = ?,
+                       comment    = ?, 
+                       remark     = ?
+        ";
+        $params = [$now, $status, $assign, $comment, $remark];
 
+        // conditional timestamps
         if ($status === 'Open') {
             $sql .= ", assigned_at = ?";
             $params[] = $now;
         }
         if ($status === 'In Progress') {
+            // stamp both assigned_at & inprogress_at
             $sql .= ", assigned_at = ?, inprogress_at = ?";
             $params[] = $now;
             $params[] = $now;
@@ -165,13 +174,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $db->prepare($sql)->execute($params);
 
     } else {
+        // — Insert new incident —
         $now = date('Y-m-d H:i:s');
+
+        // a) INSERT must include updated_at = NOW()
         $stmt = $db->prepare("
             INSERT INTO incidents
-              (problem_type, custom_problem, severity,
-               description, informant_name, informant_department,
-               status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, 'Open', NOW())
+              (problem_type,
+               custom_problem,
+               severity,
+               description,
+               informant_name,
+               informant_department,
+               status,
+               created_at,
+               updated_at,
+               comment) 
+            VALUES (?, ?, ?, ?, ?, ?, 'Open', ?, ?, ?)
         ");
         $stmt->execute([
             $_POST['problem_type'] ?? '',
@@ -180,14 +199,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_POST['description'] ?? '',
             $_POST['informant_name'] ?? '',
             $_POST['informant_department'] ?? '',
+            $now,   // created_at
+            $now,   // updated_at
+            ''      // comment = empty by default on create
         ]);
 
+        // b) grab new incident ID
         $incidentId = $db->lastInsertId();
 
+        // c) handle photo uploads
         if (!empty($_FILES['photos']['tmp_name']) && is_array($_FILES['photos']['tmp_name'])) {
             $uploadDir = __DIR__ . '/uploads/';
-            if (!is_dir($uploadDir))
+            if (!is_dir($uploadDir)) {
                 mkdir($uploadDir, 0755, true);
+            }
 
             foreach ($_FILES['photos']['error'] as $i => $err) {
                 if ($err !== UPLOAD_ERR_OK)
@@ -206,13 +231,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // redirect to clear POST
     header('Location: report_incident.php');
     exit;
 }
 
 
+
+// ─── Fetch only Open & In Progress incidents for display ───────────
 $incidents = $db->query("
-    SELECT 
+    SELECT
       i.id,
       i.problem_type,
       i.custom_problem,
@@ -223,14 +251,18 @@ $incidents = $db->query("
       i.status,
       i.assign_to,
       i.remark,
-      DATE_FORMAT(i.created_at,    '%Y-%m-%d %H:%i') AS created_at,
-      DATE_FORMAT(i.assigned_at,   '%Y-%m-%d %H:%i') AS assigned_at,
-      DATE_FORMAT(i.inprogress_at, '%Y-%m-%d %H:%i') AS inprogress_at,
-      DATE_FORMAT(i.resolved_at,   '%Y-%m-%d %H:%i') AS resolved_at
+      i.comment,
+      DATE_FORMAT(i.created_at, '%Y-%m-%d %H:%i')      AS created_at,
+      DATE_FORMAT(i.updated_at, '%Y-%m-%d %H:%i')      AS updated_at,
+      i.updated_at                                     AS raw_updated_at,
+      DATE_FORMAT(i.assigned_at, '%Y-%m-%d %H:%i')     AS assigned_at,
+      DATE_FORMAT(i.inprogress_at, '%Y-%m-%d %H:%i')   AS inprogress_at,
+      DATE_FORMAT(i.resolved_at, '%Y-%m-%d %H:%i')     AS resolved_at
     FROM incidents i
     WHERE i.status IN ('Open','In Progress')
     ORDER BY i.id DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
+
 ?>
 
 
@@ -481,16 +513,17 @@ $incidents = $db->query("
                                             data-bs-toggle="modal" data-bs-target="#viewModal" data-id="<?= $i['id'] ?>"
                                             data-problem="<?= htmlspecialchars($i['problem_type']) ?>"
                                             data-custom="<?= htmlspecialchars($i['custom_problem']) ?>"
-                                            data-severity="<?= $i['severity'] ?>"
+                                            data-severity="<?= htmlspecialchars($i['severity']) ?>"
                                             data-informant="<?= htmlspecialchars($i['informant_name']) ?>"
                                             data-department="<?= htmlspecialchars($i['informant_department']) ?>"
                                             data-description="<?= htmlspecialchars($i['description']) ?>"
-                                            data-created="<?= $i['created_at'] ?>"
+                                            data-created="<?= $i['created_at'] ?>" data-updated="<?= $i['updated_at'] ?>"
                                             data-status="<?= htmlspecialchars($i['status']) ?>"
                                             data-assign="<?= htmlspecialchars($i['assign_to']) ?>"
                                             data-assigned_at="<?= $i['assigned_at'] ?>"
                                             data-inprogress_at="<?= $i['inprogress_at'] ?>"
                                             data-resolved_at="<?= $i['resolved_at'] ?>"
+                                            data-comment="<?= htmlspecialchars($i['comment'] ?? '') ?>"
                                             data-photos='<?= htmlspecialchars($photosJson, ENT_QUOTES) ?>'>
                                             View
                                         </button>
@@ -498,9 +531,13 @@ $incidents = $db->query("
                                         <button class="btn btn-sm btn-info edit-btn" data-id="<?= $i['id'] ?>"
                                             data-status="<?= htmlspecialchars($i['status']) ?>"
                                             data-assign="<?= htmlspecialchars($i['assign_to']) ?>"
-                                            data-remark="<?= htmlspecialchars($i['remark'] ?? '') ?>">
+                                            data-remark="<?= htmlspecialchars($i['remark'] ?? '') ?>"
+                                            data-comment="<?= htmlspecialchars($i['comment'] ?? '') ?>"
+                                            data-raw_updated="<?= htmlspecialchars($i['raw_updated_at']) ?>">
                                             Edit
                                         </button>
+
+
 
                                     </td>
                                 </tr>
@@ -603,32 +640,54 @@ $incidents = $db->query("
                     <h5 class="modal-title">Incident Details</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
+
                 <div class="modal-body">
                     <dl class="row">
                         <dt class="col-sm-3">ID</dt>
                         <dd class="col-sm-9" id="view-id"></dd>
+
                         <dt class="col-sm-3">Type</dt>
                         <dd class="col-sm-9" id="view-problem"></dd>
+
                         <dt class="col-sm-3">Custom</dt>
                         <dd class="col-sm-9" id="view-custom"></dd>
+
                         <dt class="col-sm-3">Severity</dt>
                         <dd class="col-sm-9" id="view-severity"></dd>
+
                         <dt class="col-sm-3">Informant</dt>
                         <dd class="col-sm-9" id="view-informant"></dd>
+
                         <dt class="col-sm-3">Dept.</dt>
                         <dd class="col-sm-9" id="view-dept"></dd>
+
                         <dt class="col-sm-3">Description</dt>
                         <dd class="col-sm-9" id="view-description"></dd>
+
                         <dt class="col-sm-3">Created At</dt>
                         <dd class="col-sm-9" id="view-created"></dd>
+
+                        <dt class="col-sm-3">Last Updated</dt>
+                        <dd class="col-sm-9" id="view-updated"></dd> <!-- NEW -->
+
                         <dt class="col-sm-3">Status</dt>
                         <dd class="col-sm-9" id="view-status"></dd>
+
                         <dt class="col-sm-3">Assigned To</dt>
                         <dd class="col-sm-9" id="view-assign"></dd>
+
                         <dt class="col-sm-3">Assigned At</dt>
                         <dd class="col-sm-9" id="view-assigned_at"></dd>
+
                         <dt class="col-sm-3">In Progress</dt>
                         <dd class="col-sm-9" id="view-inprogress_at"></dd>
+
+                        <dt class="col-sm-3">Resolved At</dt>
+                        <dd class="col-sm-9" id="view-resolved_at"></dd>
+
+                        <dt class="col-sm-3">Comment</dt>
+                        <dd class="col-sm-9" id="view-comment"><em>No comment</em></dd> <!-- NEW -->
+
                         <dt class="col-sm-3">Photos</dt>
                         <dd class="col-sm-9" id="view-photos"><em>No photos</em></dd>
                     </dl>
@@ -636,6 +695,7 @@ $incidents = $db->query("
             </div>
         </div>
     </div>
+
 
     <!-- Full-Screen Photo Preview Modal -->
     <div class="modal fade" id="photoModal" tabindex="-1" aria-hidden="true">
@@ -664,6 +724,8 @@ $incidents = $db->query("
                     </div>
                     <div class="modal-body">
                         <input type="hidden" name="update_id" id="edit_update_id">
+
+                        <!-- Status dropdown -->
                         <div class="mb-3">
                             <label>Status</label>
                             <select name="status" id="edit_status" class="form-select">
@@ -673,6 +735,8 @@ $incidents = $db->query("
                                 <option>Cancelled</option>
                             </select>
                         </div>
+
+                        <!-- Assigned To dropdown + “Other” field -->
                         <div class="mb-3">
                             <label>Assigned To</label>
                             <select name="assign_to" id="edit_assign_to" class="form-select">
@@ -683,16 +747,28 @@ $incidents = $db->query("
                                 <option value="__other__">Other…</option>
                             </select>
                             <input type="text" name="assign_custom" id="edit_assign_custom" class="form-control mt-2"
-                                placeholder="Enter new assignee" style="display:none;">
+                                placeholder="Enter new assignee" style="display: none;">
                         </div>
+
+                        <!-- Comment (always visible) -->
+                        <div class="mb-3">
+                            <label for="edit_comment" class="form-label">Comment</label>
+                            <textarea name="comment" id="edit_comment" class="form-control" rows="3"
+                                placeholder="Type any comment…"></textarea>
+                        </div>
+
+                        <!-- Remark (only when Closed or Cancelled) -->
                         <div class="mb-3" id="edit_remark_group" style="display: none;">
                             <label for="edit_remark" class="form-label">Remark</label>
                             <textarea name="remark" id="edit_remark" class="form-control" rows="3"
                                 placeholder="Enter a remark when closing or cancelling"></textarea>
                         </div>
                     </div>
+
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                            Cancel
+                        </button>
                         <button type="submit" class="btn btn-primary">Save changes</button>
                     </div>
                 </form>
@@ -700,38 +776,38 @@ $incidents = $db->query("
         </div>
     </div>
 
-    <!-- JS -->
+
+    <!-- JS (jQuery, Bootstrap, DataTables, etc.) -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
     <script src="https://cdn.datatables.net/1.13.4/js/dataTables.bootstrap5.min.js"></script>
     <script src="https://cdn.datatables.net/responsive/2.4.1/js/dataTables.responsive.min.js"></script>
     <script src="https://cdn.datatables.net/responsive/2.4.1/js/responsive.bootstrap5.min.js"></script>
+
     <script>
         $(document).ready(function () {
             const sb = document.getElementById('sidebar'),
                 ct = document.getElementById('container'),
                 exp = localStorage.getItem('sidebarExpanded') === 'true';
-            if (exp) sb.classList.add('expanded'), ct.classList.add('expanded');
+            if (exp) {
+                sb.classList.add('expanded');
+                ct.classList.add('expanded');
+            }
             sb.querySelector('h2').addEventListener('click', () => {
                 const e = sb.classList.toggle('expanded');
                 ct.classList.toggle('expanded');
                 localStorage.setItem('sidebarExpanded', e);
             });
 
+            // ─── DataTable init ───────────────────────────────────────────────
             $('#incidentTable').DataTable({
                 dom:
                     '<"row mb-3"<"col-sm-6"l><"col-sm-6"f>>' +
                     '<"table-responsive"t>' +
                     '<"row mt-3"<"col-sm-5"i><"col-sm-7"p>>',
-
                 responsive: false,
                 scrollX: true,
-                // responsive: {
-                //     details: {
-                //         type: 'inline'
-                //     }
-                // },
                 autoWidth: false,
                 paging: true,
                 lengthChange: true,
@@ -742,6 +818,7 @@ $incidents = $db->query("
                 columnDefs: [{ orderable: false, targets: -1 }]
             });
 
+            // ─── staffcode → auto-fill name & department ────────────────────────
             const hrmData = <?= json_encode($hrmUsers, JSON_HEX_TAG) ?>;
             $('#staffcode').on('input change', function () {
                 const code = this.value,
@@ -750,9 +827,12 @@ $incidents = $db->query("
                 $('#informant_department').val(u ? u.branch_name : '');
             });
 
+            // ─── View-modal population ─────────────────────────────────────────
             $('#incidentTable').on('click', '.view-btn', function () {
-                const btn = $(this),
-                    photos = JSON.parse(btn.attr('data-photos') || '[]');
+                const btn = $(this);
+                const photos = JSON.parse(btn.attr('data-photos') || '[]');
+                const updated = btn.data('updated') || '';
+                const comment = btn.data('comment') || '';
 
                 $('#view-id').text(btn.data('id'));
                 $('#view-problem').text(btn.data('problem'));
@@ -762,21 +842,28 @@ $incidents = $db->query("
                 $('#view-dept').text(btn.data('department'));
                 $('#view-description').text(btn.data('description'));
                 $('#view-created').text(btn.data('created'));
+                $('#view-updated').text(updated);           // NEW
                 $('#view-status').text(btn.data('status'));
                 $('#view-assign').text(btn.data('assign'));
                 $('#view-assigned_at').text(btn.data('assigned_at'));
                 $('#view-inprogress_at').text(btn.data('inprogress_at'));
+                $('#view-resolved_at').text(btn.data('resolved_at'));
 
+                // Populate “Comment” field (or fallback)
+                if (comment.trim()) {
+                    $('#view-comment').text(comment);
+                } else {
+                    $('#view-comment').html('<em>No comment</em>');
+                }
+
+                // Render photo thumbnails
                 let html = '';
                 photos.forEach(p => {
                     html += `
-                <img
-                  src="${p}"
-                  class="img-thumbnail photo-thumb me-1 mb-1"
-                  style="max-height:300px; cursor:pointer;"
-                  alt="Incident Photo"
-                >
-            `;
+        <img src="${p}"
+             class="img-thumbnail photo-thumb me-1 mb-1"
+             style="max-height:150px; cursor:pointer;"
+             alt="Incident Photo">`;
                 });
                 $('#view-photos').html(html || '<em>No photos</em>');
             });
@@ -792,35 +879,40 @@ $incidents = $db->query("
                     id = btn.data('id') || '',
                     status = btn.data('status') || '',
                     assign = btn.data('assign') || '',
-                    remark = btn.data('remark') || '';
+                    remark = btn.data('remark') || '',
+                    comment = btn.data('comment') || '';  // ◀︎ new
 
                 $('#edit_update_id').val(id);
-                $('#edit_status').val(status).trigger('change');
-                $('#edit_remark').val(remark);
+                $('#edit_status')
+                    .val(status)
+                    .trigger('change');
 
+                $('#edit_remark').val(remark);
+                $('#edit_comment').val(comment);   // ◀︎ populate comment
+
+                // Set “Assigned To” dropdown or “Other…”:
                 const $sel = $('#edit_assign_to'),
                     $other = $('#edit_assign_custom'),
                     hasOpt = $sel.find(`option[value="${assign}"]`).length > 0;
 
                 if (hasOpt) {
-                    // one of the existing names
                     $sel.val(assign);
                     $other.hide().val('');
                 }
                 else if (assign) {
-                    // custom name
                     $sel.val('__other__');
                     $other.show().val(assign);
                 }
                 else {
-                    // unassigned
                     $sel.val('');
                     $other.hide().val('');
                 }
 
+                // Show the modal
                 new bootstrap.Modal($('#editIncidentModal')).show();
             });
 
+            // Show “assign_custom” input if user picks “Other…”
             $('#edit_assign_to').on('change', function () {
                 if (this.value === '__other__') {
                     $('#edit_assign_custom').show().focus();
@@ -829,9 +921,20 @@ $incidents = $db->query("
                 }
             });
 
-
+            // Show/hide “Remark” only when status = Closed or Cancelled:
+            $('#edit_status').on('change', function () {
+                const v = this.value;
+                if (v === 'Closed' || v === 'Cancelled') {
+                    $('#edit_remark_group').show();
+                } else {
+                    $('#edit_remark_group').hide();
+                    $('#edit_remark').val('');
+                }
+            });
         });
+
     </script>
+
 
 </body>
 

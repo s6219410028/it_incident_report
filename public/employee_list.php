@@ -356,8 +356,8 @@ try {
                                 <th>คำนำหน้า</th>
                                 <th>Name</th>
                                 <th>Department</th>
-                                <th>Company</th>
                                 <th>Position</th>
+                                <th>Company</th>
                                 <th>Date serve</th>
                                 <th>Status</th>
                             </tr>
@@ -370,8 +370,8 @@ try {
                                     <td><?php echo htmlspecialchars($employee['prefix']); ?></td>
                                     <td><?php echo htmlspecialchars($employee['name']); ?></td>
                                     <td><?php echo htmlspecialchars($employee['branch_name']); ?></td>
-                                    <td><?php echo htmlspecialchars($employee['department_name']); ?></td>
                                     <td><?php echo htmlspecialchars($employee['designation']); ?></td>
+                                    <td><?php echo htmlspecialchars($employee['department_name']); ?></td>
                                     <td><?php echo htmlspecialchars($employee['date_serve']); ?></td>
                                     <td><?php echo htmlspecialchars($employee['status']); ?></td>
                                 </tr>
